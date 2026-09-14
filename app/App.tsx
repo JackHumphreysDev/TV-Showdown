@@ -43,7 +43,15 @@ export default function App() {
   }, []);
   useEffect(() => {
     getToken().then(async (stored) => {
-      if (stored) { try { await refreshBase(stored); setToken(stored); } catch { await setStoredToken(null); } }
+      if (stored) {
+        try { await refreshBase(stored); setToken(stored); }
+        catch (cause) {
+          if (cause instanceof TypeError) {
+            setToken(stored);
+            setError('You’re offline. Reconnect to load your groups and watchlists. Your sign-in is saved.');
+          } else await setStoredToken(null);
+        }
+      }
       setBooting(false);
     });
     Linking.getInitialURL().then((url) => { const code = joinCode(url); if (code) { setRoomCode(code); setPage('groups'); } });
@@ -146,7 +154,7 @@ export default function App() {
       <Text style={s.sideFooter}>UNITED KINGDOM · ENGLISH (UK)</Text></View>}
     <View style={s.main}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[s.content, !desktop && s.contentMobile]}>
       {!desktop && <Text style={s.brand}>TV <Text style={{ color: gold }}>SHOWDOWN</Text></Text>}
-      {error && <Pressable onPress={() => setError('')} style={s.errorBox}><Text style={s.error}>{error}  ·  Dismiss</Text></Pressable>}
+      {error && <View style={s.errorBox}><Text style={s.error}>{error}</Text>{!me && <Button label="Retry connection" quiet onPress={() => perform(async () => { await refreshBase(token!); })} disabled={busy} />}<Pressable onPress={() => setError('')}><Text style={s.small}>Dismiss</Text></Pressable></View>}
 
       {page === 'spin' && <><Text style={s.eyebrow}>TONIGHT’S DECISION</Text><Text style={s.title}>The wheel decides.</Text>
         <View style={s.row}>{groups.map((g) => <Chip key={g.id} label={g.name} active={groupId === g.id} onPress={() => setGroupId(g.id)} />)}</View>
