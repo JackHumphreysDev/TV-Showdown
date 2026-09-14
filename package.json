@@ -1,0 +1,15 @@
+{
+  "name": "tv-showdown",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev:api": "node --env-file-if-exists=.env --watch server/index.mjs",
+    "dev:app": "npm --prefix app start",
+    "web": "npm --prefix app run web",
+    "ios": "npm --prefix app run ios",
+    "android": "npm --prefix app run android",
+    "check": "npm --prefix app run typecheck && node --test server/*.test.mjs"
+  },
+  "engines": { "node": ">=22" }
+}
