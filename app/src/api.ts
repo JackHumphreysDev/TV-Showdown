@@ -3,7 +3,7 @@ import * as SecureStore from 'expo-secure-store';
 
 export type Kind = 'movie' | 'series';
 export type Status = 'want' | 'watching' | 'watched';
-export type Me = { id: string; email: string; profile_id: string; name: string; colour: string };
+export type Me = { id: string; email: string; profile_id: string; name: string; colour: string; active: number };
 export type Member = { accountId: string; profileId: string; name: string; colour: string; active: number; role: 'owner' | 'member' };
 export type Item = { id: string; title: string; kind: Kind; year?: number | null; tmdbId?: number | null; posterPath?: string | null; overview?: string | null; status: Status; profileId?: string; accountId?: string };
 export type Group = { id: string; name: string; region: string; role: string; memberCount?: number; members?: Member[]; watchlists?: Item[] };
