@@ -12,6 +12,14 @@ async function call(path, token, method = 'GET', body) {
   assert.equal(response.ok, true, `${method} ${path}: ${JSON.stringify(data)}`);
   return data;
 }
+async function expectStatus(path, token, expected, method = 'GET', body) {
+  const response = await fetch(`${base}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  assert.equal(response.status, expected, `${method} ${path} should return ${expected}`);
+}
 const suffix = randomUUID().slice(0, 8);
 const password = `test-password-${suffix}-only`;
 const rachel = await call('/api/auth/register', null, 'POST', { email: `rachel-${suffix}@example.invalid`, password, name: 'Rachel' });
@@ -23,7 +31,7 @@ const invite = await call(`/api/groups/${group.id}/invite`, rachel.token, 'POST'
 const preview = await call(`/api/invites/${invite.code}`, null);
 assert.equal(preview.name, 'Film night test');
 await call('/api/groups/join', regis.token, 'POST', { code: invite.code });
-await call('/api/watchlist', rachel.token, 'POST', { title: 'Rachel film', kind: 'movie' });
+const rachelFilm = await call('/api/watchlist', rachel.token, 'POST', { title: 'Rachel film', kind: 'movie' });
 await call('/api/watchlist', rachel.token, 'POST', { title: 'Rachel series', kind: 'series' });
 await call('/api/watchlist', regis.token, 'POST', { title: 'Regis film', kind: 'movie' });
 const regisSeries = await call('/api/watchlist', regis.token, 'POST', { title: 'Regis series', kind: 'series' });
@@ -40,4 +48,16 @@ const accepted = await call(`/api/groups/${group.id}/accept`, regis.token, 'POST
 assert.equal(accepted.state, 'accepted');
 const history = await call(`/api/groups/${group.id}/history`, rachel.token);
 assert.equal(history[0].resultState, 'accepted');
-console.log('API smoke test passed: separate accounts, invite, UK group, watchlists, eligible series, fair spin, idempotency and shared acceptance.');
+const watchedResult = await call(`/api/groups/${group.id}/spin`, rachel.token, 'POST', {
+  selectedProfileIds: [rachelMe.profile_id], filter: 'movie', idempotencyKey: `watched-${suffix}`,
+});
+assert.equal(watchedResult.result.watchlistItemId, rachelFilm.id);
+await expectStatus(`/api/watchlist/${watchedResult.result.watchlistItemId}`, regis.token, 404, 'PATCH', { status: 'watched' });
+await call(`/api/watchlist/${watchedResult.result.watchlistItemId}`, rachel.token, 'PATCH', { status: 'watched' });
+const updatedList = await call('/api/watchlist', rachel.token);
+assert.equal(updatedList.find((item) => item.id === rachelFilm.id).status, 'watched');
+const updatedGroup = await call(`/api/groups/${group.id}`, regis.token);
+assert(!updatedGroup.watchlists.some((item) => item.id === rachelFilm.id));
+const current = await call(`/api/groups/${group.id}/current`, regis.token);
+assert.equal(current.result.watchlistItemId, rachelFilm.id);
+console.log('API smoke test passed: separate accounts, invite, UK group, watchlists, eligible series, fair spin, shared acceptance and owner-only result completion.');

@@ -60,6 +60,9 @@ export default function App() {
   const chosenMembers = useMemo(() => members.filter((m) => selected.includes(m.profileId)), [members, selected]);
   const canSpin = chosenMembers.length > 0 && chosenMembers.every((m) => groupItems.some((i) => i.profileId === m.profileId && (filter === 'both' || i.kind === filter)));
   const eligibleOwn = watchlist.filter((i) => i.status === 'want' || (i.kind === 'series' && i.status === 'watching')).length;
+  const resultItemId = spin?.result.watchlistItemId;
+  const isWinningOwner = spin?.winnerProfileId === me?.profile_id;
+  const winningOwnItem = isWinningOwner && resultItemId ? watchlist.find((item) => item.id === resultItemId) : undefined;
 
   const authenticate = () => perform(async () => {
     const result = await api<{ token: string }>(`/api/auth/${authMode}`, null, 'POST', { email, password, name });
@@ -126,6 +129,12 @@ export default function App() {
     setShowOptions(true); if (!spin?.result.tmdbId) { setOptions({ configured: true, offers: [] }); return; }
     setOptions(await api<Availability>(`/api/availability?kind=${spin.result.kind}&tmdbId=${spin.result.tmdbId}`, token));
   });
+  const markResultWatched = () => perform(async () => {
+    if (!spin || !groupId || !winningOwnItem) return;
+    await api(`/api/watchlist/${winningOwnItem.id}`, token, 'PATCH', { status: 'watched' });
+    await refreshBase(token!);
+    await refreshGroup(token!, groupId);
+  });
 
   if (booting) return <View style={s.boot}><ActivityIndicator color={gold} /><Text style={s.brand}>TV SHOWDOWN</Text></View>;
   if (!token) return <View style={s.root}><StatusBar barStyle="light-content" /><ScrollView contentContainerStyle={s.authContent}>
@@ -154,6 +163,7 @@ export default function App() {
           {spin && !animating && <View style={s.featured}><Text style={s.eyebrow}>{spin.state === 'accepted' ? 'TONIGHT’S PICK' : 'THE WHEEL HAS SPOKEN'}</Text><Text style={s.goldText}>{spin.result.profile_name}’s pick</Text>
             <View style={s.featuredRow}><Poster title={spin.result.title} path={spin.result.posterPath} size={105} /><View style={{ flex: 1 }}><Text style={s.featuredTitle}>{spin.result.title}</Text><Text style={s.muted}>{kindLabel(spin.result.kind)}{spin.result.year ? ` · ${spin.result.year}` : ''}</Text><Text style={s.small} numberOfLines={4}>{spin.result.overview || 'From the winning watchlist.'}</Text></View></View>
             {spin.state === 'active' ? <View style={s.row}><Button label="Watch this" onPress={viewOptions} disabled={busy} /><Button label="Skip title" quiet onPress={() => spinAction('skip')} disabled={!spin.canSkip || busy} /></View> : <Text style={s.goldText}>✓ Saved as tonight’s pick</Text>}
+            {winningOwnItem?.status === 'watched' ? <Text style={s.goldText}>✓ Marked watched on your list</Text> : winningOwnItem ? <Button label="Mark as watched" quiet onPress={markResultWatched} disabled={busy} /> : <Text style={s.small}>{isWinningOwner ? 'This title is no longer on your watchlist.' : `Only ${spin.result.profile_name} can mark this title as watched.`}</Text>}
           </View>}
           {showOptions && <View style={s.card}><Text style={s.eyebrow}>UNITED KINGDOM</Text><Text style={s.section}>Where to watch</Text>
             {!options ? <ActivityIndicator color={gold} /> : !options.configured ? <Text style={s.muted}>Viewing options are not connected yet. Add a TMDB API token to enable UK availability.</Text> : options.offers.length ? <><Text style={s.muted}>JustWatch data via TMDB. Check the service before paying or subscribing.</Text>{options.offers.map((o, i) => <View key={`${o.provider}-${o.accessType}-${i}`} style={s.offer}><Text style={s.white}>{o.provider}</Text><Text style={s.goldText}>{o.accessType}</Text></View>)}{options.checkedAt && <Text style={s.small}>Checked {new Date(options.checkedAt).toLocaleString('en-GB')}</Text>}{options.link && <Button label="View options on TMDB" onPress={() => { Linking.openURL(options.link!); spinAction('accept'); }} />}</> : <Text style={s.muted}>No verified viewing options found in the United Kingdom. You can still save this pick.</Text>}
