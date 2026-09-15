@@ -220,4 +220,4 @@ Persist identifiers rather than copying the entire catalogue record into a watch
 
 - United Kingdom is the first viewing-availability region; the interface uses UK English.
 - TMDB provides catalogue metadata and UK availability supplied by JustWatch in the development build. Attribution and commercial licensing must be checked before public launch. This source currently supplies a TMDB viewing-options link, not direct provider-title links.
-- One Expo codebase targets web, iOS and Android. Web has been exported and locally tested; native device tests, signing and distribution are still release checkpoints. The web build has not yet been assessed or packaged as an installable PWA.
+- One Expo codebase targets web, iOS and Android. The web export now includes an installable PWA manifest, icons and an offline static shell; public hosting and installability checks on target browsers remain. Native device tests, signing and distribution are still release checkpoints.
