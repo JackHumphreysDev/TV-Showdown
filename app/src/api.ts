@@ -9,10 +9,24 @@ export type Item = { id: string; title: string; kind: Kind; year?: number | null
 export type Group = { id: string; name: string; region: string; role: string; memberCount?: number; members?: Member[]; watchlists?: Item[] };
 export type Result = { id: string; watchlistItemId: string; title: string; kind: Kind; year?: number | null; tmdbId?: number | null; posterPath?: string | null; overview?: string | null; profile_name: string; state: string };
 export type Spin = { id: string; state: string; version: number; winnerProfileId: string; result: Result; canSkip: boolean };
-export type SearchResult = { tmdbId: number; title: string; kind: Kind; year?: number | null; posterPath?: string | null; overview?: string };
+export type SearchResult = { tmdbId: number; title: string; kind: Kind; year?: number | null; posterPath?: string | null; overview?: string; popularity?: number };
+export type CatalogueResponse = { configured: boolean; page: number; totalPages: number; totalResults: number; results: SearchResult[] };
+export type CatalogueTitle = SearchResult & { runtime?: number | null; genres?: string[]; backdropPath?: string | null; voteAverage?: number | null; voteCount?: number; status?: string | null };
+export type CatalogueDetailsResponse = { configured: boolean; title: CatalogueTitle | null };
 export type Offer = { provider: string; accessType: string };
 export type Availability = { configured: boolean; offers: Offer[]; link?: string | null; checkedAt?: string; source?: string };
-export type HistoryRow = { id: string; state: string; createdAt: string; winnerName: string; title: string; kind: Kind; year?: number; resultState: string };
+export type HistoryRow = {
+  id: string;
+  sessionId: string;
+  sessionState: 'active' | 'accepted' | 'superseded' | 'cancelled';
+  roundStartedAt: string;
+  createdAt: string;
+  winnerName: string;
+  title: string;
+  kind: Kind;
+  year?: number | null;
+  resultState: 'pending' | 'skipped' | 'accepted';
+};
 
 export const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
