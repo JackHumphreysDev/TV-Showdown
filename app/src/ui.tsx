@@ -4,7 +4,16 @@ import Svg, { Circle, Path, Text as SvgText } from 'react-native-svg';
 import { Kind, Member } from './api';
 
 export const gold = '#F4C567';
-const colours = ['#F4C567', '#D390A7', '#9EB8C1', '#A997CE', '#D98B74', '#93B9A6', '#D5B380', '#8C9FBE'];
+export const profileColours = [
+  { value: '#F4C567', label: 'Gold' },
+  { value: '#D390A7', label: 'Rose' },
+  { value: '#9EB8C1', label: 'Sky' },
+  { value: '#A997CE', label: 'Lavender' },
+  { value: '#D98B74', label: 'Coral' },
+  { value: '#93B9A6', label: 'Sage' },
+  { value: '#D5B380', label: 'Sand' },
+  { value: '#8C9FBE', label: 'Slate blue' },
+] as const;
 export const kindLabel = (kind: Kind) => kind === 'movie' ? 'Film' : 'Series';
 export const posterUrl = (path?: string | null) => path ? `https://image.tmdb.org/t/p/w342${path}` : null;
 
@@ -43,7 +52,7 @@ export function Wheel({ members, winnerId, spinning }: { members: Member[]; winn
       {members.map((m, i) => {
         const a = point(-90 + i * slice, radius), b = point(-90 + (i + 1) * slice, radius), label = point(-90 + (i + 0.5) * slice, radius * 0.66);
         const d = n === 1 ? `M ${centre} ${centre - radius} A ${radius} ${radius} 0 1 1 ${centre - .01} ${centre - radius} Z` : `M ${centre} ${centre} L ${a.x} ${a.y} A ${radius} ${radius} 0 ${slice > 180 ? 1 : 0} 1 ${b.x} ${b.y} Z`;
-        return <React.Fragment key={m.profileId}><Path d={d} fill={colours[i % colours.length]} stroke="#151518" strokeWidth={4} /><SvgText x={label.x} y={label.y} textAnchor="middle" alignmentBaseline="middle" fill="#181719" fontWeight="700" fontSize={n > 7 ? 10 : 14}>{m.name.slice(0, n > 7 ? 7 : 10)}</SvgText></React.Fragment>;
+        return <React.Fragment key={m.profileId}><Path d={d} fill={m.colour || profileColours[i % profileColours.length].value} stroke="#151518" strokeWidth={4} /><SvgText x={label.x} y={label.y} textAnchor="middle" alignmentBaseline="middle" fill="#181719" fontWeight="700" fontSize={n > 7 ? 10 : 14}>{m.name.slice(0, n > 7 ? 7 : 10)}</SvgText></React.Fragment>;
       })}
       <Circle cx={centre} cy={centre} r={24} fill="#161619" /><Circle cx={centre} cy={centre} r={9} fill={gold} />
     </Svg></Animated.View>

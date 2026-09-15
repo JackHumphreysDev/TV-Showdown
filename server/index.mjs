@@ -9,6 +9,7 @@ const host = process.env.HOST || '127.0.0.1';
 const appOrigin = process.env.APP_ORIGIN || 'http://localhost:8081';
 const publicAppUrl = process.env.PUBLIC_APP_URL || appOrigin;
 const inviteAttempts = new Map();
+const profileColours = new Set(['#F4C567', '#D390A7', '#9EB8C1', '#A997CE', '#D98B74', '#93B9A6', '#D5B380', '#8C9FBE']);
 const hash = (value) => createHash('sha256').update(value).digest('hex');
 const fail = (status, message) => { const error = new Error(message); error.status = status; throw error; };
 const requiredText = (value, label, max = 120) => {
@@ -166,9 +167,14 @@ async function route(request) {
   if (method === 'GET' && path === '/api/me') return me;
   if (method === 'PATCH' && path === '/api/me') {
     const data = await body(request);
-    const name = requiredText(data.name, 'Profile name', 60);
-    run('UPDATE profiles SET name=? WHERE account_id=?', name, me.id);
-    return { ...me, name };
+    const name = data.name === undefined ? me.name : requiredText(data.name, 'Profile name', 60);
+    const storedColour = String(me.colour || '').toUpperCase();
+    const colour = data.colour === undefined
+      ? (profileColours.has(storedColour) ? storedColour : '#F4C567')
+      : String(data.colour).toUpperCase();
+    if (!profileColours.has(colour)) fail(400, 'Choose a valid profile colour');
+    run('UPDATE profiles SET name=?, colour=? WHERE account_id=?', name, colour, me.id);
+    return { ...me, name, colour };
   }
   if (method === 'POST' && path === '/api/auth/logout') {
     run('DELETE FROM sessions WHERE token_hash=?', hash(request.headers.authorization.replace(/^Bearer /i, '')));
