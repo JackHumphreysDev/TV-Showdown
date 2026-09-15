@@ -3,7 +3,7 @@ import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from
 import { db, transaction } from './db.mjs';
 import { eligible, draw, inviteCode } from './core.mjs';
 import { groupHistory } from './history.mjs';
-import { searchTitles, availability } from './tmdb.mjs';
+import { searchTitles, catalogueTitles, titleDetails, availability } from './tmdb.mjs';
 
 const port = Number(process.env.PORT || 4000);
 const host = process.env.HOST || '127.0.0.1';
@@ -227,6 +227,22 @@ async function route(request) {
     if (!one('SELECT id FROM watchlist WHERE id=? AND account_id=?', itemMatch[1], me.id)) fail(404, 'Title not found');
     run('DELETE FROM watchlist WHERE id=?', itemMatch[1]);
     return { ok: true };
+  }
+  if (method === 'GET' && path === '/api/catalogue') {
+    const rawKind = url.searchParams.get('kind') || 'both';
+    if (!['both', 'movie', 'series'].includes(rawKind)) fail(400, 'Invalid catalogue type');
+    const rawPage = url.searchParams.get('page') || '1';
+    const page = Number(rawPage);
+    if (!/^\d+$/.test(rawPage) || !Number.isSafeInteger(page) || page < 1 || page > 500) fail(400, 'Catalogue page must be between 1 and 500');
+    const query = String(url.searchParams.get('q') || '').trim();
+    if (query.length > 120) fail(400, 'Search must be 120 characters or fewer');
+    return catalogueTitles({ query, kind: rawKind, page });
+  }
+  const catalogueMatch = path.match(/^\/api\/catalogue\/(movie|series)\/(\d+)$/);
+  if (catalogueMatch && method === 'GET') {
+    const tmdbId = Number(catalogueMatch[2]);
+    if (!Number.isSafeInteger(tmdbId) || tmdbId <= 0) fail(400, 'Invalid title');
+    return titleDetails(catalogueMatch[1], tmdbId);
   }
   if (method === 'GET' && path === '/api/search') return searchTitles(requiredText(url.searchParams.get('q'), 'Search', 120));
   if (method === 'GET' && path === '/api/availability') {
