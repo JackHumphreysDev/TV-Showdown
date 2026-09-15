@@ -88,6 +88,35 @@ function revokeGroupInvites(groupId) {
 function cancelGroupSpin(groupId) {
   run(`UPDATE spin_sessions SET state='cancelled', version=version+1 WHERE group_id=? AND state='active'`, groupId);
 }
+function cancelSpinsForProfile(accountId, profileId) {
+  const sessions = all(`SELECT ss.id, ss.selected_profiles AS selectedProfiles FROM spin_sessions ss
+    JOIN memberships m ON m.group_id=ss.group_id
+    WHERE m.account_id=? AND ss.state='active'`, accountId);
+  for (const session of sessions) {
+    if (JSON.parse(session.selectedProfiles).includes(profileId)) {
+      run("UPDATE spin_sessions SET state='cancelled', version=version+1 WHERE id=? AND state='active'", session.id);
+    }
+  }
+}
+function exportAccount(accountId) {
+  const account = one('SELECT id,email,created_at AS createdAt FROM accounts WHERE id=?', accountId);
+  const profile = one('SELECT id,name,colour,active FROM profiles WHERE account_id=?', accountId);
+  const watchlist = all(`SELECT id,title,kind,year,tmdb_id AS tmdbId,poster_path AS posterPath,
+    overview,status,added_at AS addedAt FROM watchlist WHERE account_id=? ORDER BY added_at`, accountId);
+  const groups = all(`SELECT g.id,g.name,g.region,m.role,m.joined_at AS joinedAt FROM memberships m
+    JOIN groups g ON g.id=m.group_id WHERE m.account_id=? ORDER BY m.joined_at`, accountId);
+  return { schemaVersion: 1, exportedAt: new Date().toISOString(), account, profile, watchlist, groups };
+}
+function anonymiseAccountHistory(accountId) {
+  const itemIds = all('SELECT id FROM watchlist WHERE account_id=?', accountId).map((item) => item.id);
+  if (itemIds.length) {
+    const placeholders = itemIds.map(() => '?').join(',');
+    run(`UPDATE spin_results SET profile_name='Deleted member',watchlist_item_id=NULL
+      WHERE watchlist_item_id IN (${placeholders})`, ...itemIds);
+  }
+  run(`UPDATE spin_sessions SET creator_id=(SELECT owner_id FROM groups WHERE groups.id=spin_sessions.group_id)
+    WHERE creator_id=?`, accountId);
+}
 function limitInviteAttempts(request) {
   const address = request.socket.remoteAddress || 'unknown';
   const now = Date.now();
@@ -164,11 +193,22 @@ async function route(request) {
 
   const me = auth(request);
   if (method === 'GET' && path === '/api/me') return me;
+  if (method === 'GET' && path === '/api/me/export') return exportAccount(me.id);
   if (method === 'PATCH' && path === '/api/me') {
     const data = await body(request);
     const name = requiredText(data.name, 'Profile name', 60);
     run('UPDATE profiles SET name=? WHERE account_id=?', name, me.id);
     return { ...me, name };
+  }
+  if (method === 'DELETE' && path === '/api/me') {
+    const ownedGroups = all('SELECT name FROM groups WHERE owner_id=? ORDER BY name', me.id);
+    if (ownedGroups.length) fail(409, `Transfer or delete your owned ${ownedGroups.length === 1 ? 'group' : 'groups'} first: ${ownedGroups.map((group) => group.name).join(', ')}`);
+    transaction(() => {
+      cancelSpinsForProfile(me.id, me.profile_id);
+      anonymiseAccountHistory(me.id);
+      run('DELETE FROM accounts WHERE id=?', me.id);
+    });
+    return { ok: true };
   }
   if (method === 'POST' && path === '/api/auth/logout') {
     run('DELETE FROM sessions WHERE token_hash=?', hash(request.headers.authorization.replace(/^Bearer /i, '')));

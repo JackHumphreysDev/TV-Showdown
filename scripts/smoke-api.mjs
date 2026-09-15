@@ -12,6 +12,16 @@ async function call(path, token, method = 'GET', body) {
   assert.equal(response.ok, true, `${method} ${path}: ${JSON.stringify(data)}`);
   return data;
 }
+async function callError(path, token, method, body, expectedStatus) {
+  const response = await fetch(`${base}${path}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await response.json();
+  assert.equal(response.status, expectedStatus, `${method} ${path}: ${JSON.stringify(data)}`);
+  return data;
+}
 const suffix = randomUUID().slice(0, 8);
 const password = `test-password-${suffix}-only`;
 const rachel = await call('/api/auth/register', null, 'POST', { email: `rachel-${suffix}@example.invalid`, password, name: 'Rachel' });
@@ -19,6 +29,8 @@ const regis = await call('/api/auth/register', null, 'POST', { email: `regis-${s
 const rachelMe = await call('/api/me', rachel.token);
 const regisMe = await call('/api/me', regis.token);
 const group = await call('/api/groups', rachel.token, 'POST', { name: 'Film night test' });
+const ownerDeleteError = await callError('/api/me', rachel.token, 'DELETE', undefined, 409);
+assert.match(ownerDeleteError.error, /Transfer or delete/);
 const invite = await call(`/api/groups/${group.id}/invite`, rachel.token, 'POST');
 const preview = await call(`/api/invites/${invite.code}`, null);
 assert.equal(preview.name, 'Film night test');
@@ -40,4 +52,17 @@ const accepted = await call(`/api/groups/${group.id}/accept`, regis.token, 'POST
 assert.equal(accepted.state, 'accepted');
 const history = await call(`/api/groups/${group.id}/history`, rachel.token);
 assert.equal(history[0].resultState, 'accepted');
-console.log('API smoke test passed: separate accounts, invite, UK group, watchlists, eligible series, fair spin, idempotency and shared acceptance.');
+const regisRound = await call(`/api/groups/${group.id}/spin`, regis.token, 'POST', { selectedProfileIds: [regisMe.profile_id], filter: 'series', idempotencyKey: `${suffix}-regis` });
+await call(`/api/groups/${group.id}/accept`, rachel.token, 'POST', { version: regisRound.version });
+const exported = await call('/api/me/export', regis.token);
+assert.equal(exported.account.email, `regis-${suffix}@example.invalid`);
+assert.equal(exported.watchlist.length, 2);
+assert.equal(exported.groups[0].name, 'Film night test');
+assert.equal('password_hash' in exported.account, false);
+await call('/api/me', regis.token, 'DELETE');
+await callError('/api/me', regis.token, 'GET', undefined, 401);
+const groupAfterDelete = await call(`/api/groups/${group.id}`, rachel.token);
+assert.equal(groupAfterDelete.members.length, 1);
+const historyAfterDelete = await call(`/api/groups/${group.id}/history`, rachel.token);
+assert.equal(historyAfterDelete[0].winnerName, 'Deleted member');
+console.log('API smoke test passed: separate accounts, invite, UK group, watchlists, eligible series, fair spin, idempotency, shared acceptance, safe account export and anonymised account deletion.');

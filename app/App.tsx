@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, Share, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { api, Availability, getToken, Group, HistoryRow, Item, Kind, Me, SearchResult, setStoredToken, Spin, Status } from './src/api';
+import { AccountExport, api, Availability, getToken, Group, HistoryRow, Item, Kind, Me, SearchResult, setStoredToken, Spin, Status } from './src/api';
 import { Button, Chip, Field, gold, kindLabel, Poster, Wheel } from './src/ui';
 
 type Page = 'spin' | 'watchlist' | 'groups' | 'history' | 'profile';
@@ -83,6 +83,20 @@ export default function App() {
     if (Platform.OS === 'web') { if (window.confirm(`${title}\n\n${message}`)) action(); }
     else Alert.alert(title, message, [{ text: 'Cancel' }, { text: 'Continue', style: 'destructive', onPress: action }]);
   };
+  const exportMyData = () => perform(async () => {
+    const data = await api<AccountExport>('/api/me/export', token);
+    const contents = JSON.stringify(data, null, 2);
+    if (Platform.OS === 'web') {
+      const href = URL.createObjectURL(new Blob([contents], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = href; link.download = `tv-showdown-data-${data.exportedAt.slice(0, 10)}.json`; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(href), 0);
+    } else {
+      await Share.share({ title: 'TV Showdown account data', message: contents });
+    }
+  });
+  const deleteAccount = () => confirmAction('Delete your account?', 'This permanently removes your profile, personal watchlist and group memberships. Transfer or delete any groups you own first. This cannot be undone.', () => perform(async () => {
+    await api('/api/me', token, 'DELETE'); await setStoredToken(null); setToken(null); setMe(null); setGroups([]); setGroup(null); setWatchlist([]); setSpin(null); setHistory([]); setPage('spin');
+  }));
   const revokeInvites = () => confirmAction('Revoke group invites?', 'Existing links and room codes will stop working.', () => perform(async () => {
     await api(`/api/groups/${groupId}/invites`, token, 'DELETE'); setInvite(null);
   }));
@@ -192,6 +206,7 @@ export default function App() {
       {page === 'history' && <><Text style={s.eyebrow}>PREVIOUS ROUNDS</Text><Text style={s.title}>History</Text>{!history.length ? <Text style={s.muted}>No spins yet. The first result will appear here.</Text> : history.map((h) => <View key={h.id} style={s.itemCard}><Text style={s.historyStar}>✦</Text><View style={{ flex: 1 }}><Text style={s.white}>{h.title}</Text><Text style={s.small}>{h.winnerName}’s pick · {kindLabel(h.kind)} · {new Date(h.createdAt + 'Z').toLocaleString('en-GB')}</Text></View><Text style={s.goldText}>{h.resultState === 'accepted' ? 'Chosen' : h.state === 'superseded' ? 'Re-spun' : 'Pending'}</Text></View>)}</>}
 
       {page === 'profile' && <><Text style={s.eyebrow}>YOUR ACCOUNT</Text><Text style={s.title}>Profile</Text><View style={s.card}><Text style={s.section}>{me?.name}</Text><Text style={s.small}>{me?.email}</Text><Field label="Display name" value={profileName} onChangeText={setProfileName} /><Button label="Save name" onPress={() => perform(async () => { await api('/api/me', token, 'PATCH', { name: profileName }); await refreshBase(token!); })} disabled={!profileName.trim() || busy} /><Button label="Sign out" quiet onPress={signOut} /></View>
+        <View style={s.card}><Text style={s.section}>Your data</Text><Text style={s.muted}>Create a JSON copy of your account, profile, group memberships and personal watchlist. Passwords, sessions and invite codes are never included.</Text><Button label="Export my data" quiet onPress={exportMyData} disabled={busy} /><View style={s.rule} /><Text style={s.small}>Account deletion is permanent. Groups you own must be transferred or deleted first; other members keep their group history with your identity anonymised.</Text><Pressable accessibilityRole="button" disabled={busy} onPress={deleteAccount} style={[s.dangerButton, busy && { opacity: .4 }]}><Text style={s.dangerButtonText}>Delete my account</Text></Pressable></View>
         <View style={s.card}><Text style={s.section}>About TV Showdown</Text><Text style={s.muted}>Every spin chooses one person, then one title from their eligible watchlist. Watching series stay in the draw.</Text><Text style={s.muted}>Viewing information is for the United Kingdom. Check the provider before paying.</Text><Text style={s.small}>This product uses the TMDB API but is not endorsed or certified by TMDB. UK viewing data: JustWatch via TMDB.</Text></View></>}
       {busy && <ActivityIndicator color={gold} />}
     </ScrollView>
@@ -208,5 +223,6 @@ const s = StyleSheet.create({
   memberGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, member: { minWidth: 165, flexBasis: 175, flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: '#29272B', borderWidth: 1, borderColor: '#49444D', borderRadius: 13 }, memberSelected: { borderColor: gold, backgroundColor: '#3A322B' }, avatar: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' }, avatarText: { color: '#201C19', fontSize: 17, fontWeight: '900' }, wheelCard: { backgroundColor: '#211F23', borderRadius: 20, padding: 16, gap: 12, alignItems: 'center' },
   offer: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#48424A', paddingVertical: 10, gap: 10 }, itemCard: { backgroundColor: '#1E1D21', borderColor: '#39353C', borderWidth: 1, borderRadius: 15, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 13 }, listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: '#3C3740', paddingVertical: 9 }, remove: { color: '#DB999D', fontSize: 13, marginTop: 3 }, preview: { backgroundColor: '#363029', borderRadius: 12, padding: 13, gap: 10 }, code: { color: gold, fontSize: 28, fontWeight: '900', letterSpacing: 4 }, memberLine: { flexDirection: 'row', alignItems: 'center', gap: 11 }, historyStar: { color: gold, backgroundColor: '#463621', fontSize: 23, width: 44, height: 44, borderRadius: 22, textAlign: 'center', lineHeight: 44 },
   bottomNav: { flexDirection: 'row', backgroundColor: '#1E1C21', borderTopWidth: 1, borderTopColor: '#3C3840', paddingTop: 8, paddingBottom: Platform.OS === 'ios' ? 20 : 8 }, bottomLink: { flex: 1, alignItems: 'center', gap: 2 }, bottomIcon: { color: '#88828A', fontSize: 22 }, bottomText: { color: '#928B93', fontSize: 11, fontWeight: '700' },
+  dangerButton: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', borderWidth: 1, borderColor: '#8D5559', backgroundColor: '#412A2D', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10 }, dangerButtonText: { color: '#FFBFC2', fontSize: 14, fontWeight: '800' },
   errorBox: { backgroundColor: '#4F3033', borderColor: '#9A6063', borderWidth: 1, borderRadius: 10, padding: 12 }, error: { color: '#FFCECF', fontSize: 14 }, authContent: { flexGrow: 1, width: '100%', maxWidth: 540, alignSelf: 'center', justifyContent: 'center', padding: 25, gap: 20 }, authTitle: { color: '#FFFAF3', fontSize: 72, lineHeight: 74, fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif' },
 });

@@ -13,6 +13,14 @@ export type SearchResult = { tmdbId: number; title: string; kind: Kind; year?: n
 export type Offer = { provider: string; accessType: string };
 export type Availability = { configured: boolean; offers: Offer[]; link?: string | null; checkedAt?: string; source?: string };
 export type HistoryRow = { id: string; state: string; createdAt: string; winnerName: string; title: string; kind: Kind; year?: number; resultState: string };
+export type AccountExport = {
+  schemaVersion: number;
+  exportedAt: string;
+  account: { id: string; email: string; createdAt: string };
+  profile: { id: string; name: string; colour: string; active: number };
+  watchlist: Item[];
+  groups: { id: string; name: string; region: string; role: 'owner' | 'member'; joinedAt: string }[];
+};
 
 export const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 

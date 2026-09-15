@@ -4,6 +4,8 @@ TV Showdown is a shared film-night decision app for web, iOS and Android. Each p
 
 The app uses UK English and shows viewing options for the United Kingdom. `Want to watch` films and series, and `Watching` series, are eligible for the wheel.
 
+Account holders can export a JSON copy of their profile, memberships and personal watchlist without credentials or invite secrets. Account deletion requires owned groups to be transferred or removed first, preserves other members' shared history with the deleted identity anonymised, and permanently removes the account's private data.
+
 ## What is in this repository
 
 - `app/` — one Expo/React Native interface for web, iOS and Android.
