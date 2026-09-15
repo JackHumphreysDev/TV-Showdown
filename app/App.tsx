@@ -4,11 +4,27 @@ import { api, Availability, getToken, Group, HistoryRow, Item, Kind, Me, SearchR
 import { Button, Chip, Field, gold, kindLabel, Poster, Wheel } from './src/ui';
 
 type Page = 'spin' | 'watchlist' | 'groups' | 'history' | 'profile';
+type WatchlistTab = Status;
 const nav: { page: Page; label: string; icon: string }[] = [
   { page: 'spin', label: 'Spin', icon: '◉' }, { page: 'watchlist', label: 'Watchlist', icon: '▤' },
   { page: 'groups', label: 'Groups', icon: '◎' }, { page: 'history', label: 'History', icon: '◷' }, { page: 'profile', label: 'Profile', icon: '◌' },
 ];
 const statusLabel = (value: Status) => ({ want: 'Want to watch', watching: 'Watching', watched: 'Watched' })[value];
+const watchlistTabs: { status: WatchlistTab; label: string }[] = [
+  { status: 'want', label: 'Want to watch' },
+  { status: 'watching', label: 'Watching' },
+  { status: 'watched', label: 'Watched' },
+];
+const watchlistGuidance: Record<WatchlistTab, string> = {
+  want: 'Films and series here are eligible for the wheel.',
+  watching: 'Watching series stay eligible. Watching films do not enter the wheel.',
+  watched: 'Watched titles stay in your history and do not enter the wheel.',
+};
+const watchlistEmpty: Record<WatchlistTab, string> = {
+  want: 'Nothing is waiting yet. Add a film or series above.',
+  watching: 'You have not marked anything as watching.',
+  watched: 'You have not marked anything as watched.',
+};
 const joinCode = (url: string | null) => { try { const u = new URL(url || ''); return u.searchParams.get('join') || u.searchParams.get('code') || ''; } catch { return ''; } };
 
 export default function App() {
@@ -25,6 +41,7 @@ export default function App() {
   const [invite, setInvite] = useState<{ code: string; link: string; expiresInDays: number } | null>(null);
   const [query, setQuery] = useState(''), [searchResults, setSearchResults] = useState<SearchResult[]>([]), [catalogueConnected, setCatalogueConnected] = useState(true);
   const [manualTitle, setManualTitle] = useState(''), [manualKind, setManualKind] = useState<Kind>('movie'), [profileName, setProfileName] = useState('');
+  const [watchlistTab, setWatchlistTab] = useState<WatchlistTab>('want');
 
   const perform = async (action: () => Promise<void>) => { setError(''); setBusy(true); try { await action(); } catch (e) { setError(e instanceof Error ? e.message : 'Something went wrong'); } finally { setBusy(false); } };
   const refreshBase = useCallback(async (t: string) => {
@@ -60,6 +77,8 @@ export default function App() {
   const chosenMembers = useMemo(() => members.filter((m) => selected.includes(m.profileId)), [members, selected]);
   const canSpin = chosenMembers.length > 0 && chosenMembers.every((m) => groupItems.some((i) => i.profileId === m.profileId && (filter === 'both' || i.kind === filter)));
   const eligibleOwn = watchlist.filter((i) => i.status === 'want' || (i.kind === 'series' && i.status === 'watching')).length;
+  const watchlistCounts = watchlist.reduce<Record<WatchlistTab, number>>((counts, item) => ({ ...counts, [item.status]: counts[item.status] + 1 }), { want: 0, watching: 0, watched: 0 });
+  const visibleWatchlist = watchlist.filter((item) => item.status === watchlistTab);
 
   const authenticate = () => perform(async () => {
     const result = await api<{ token: string }>(`/api/auth/${authMode}`, null, 'POST', { email, password, name });
@@ -67,7 +86,7 @@ export default function App() {
   });
   const signOut = () => perform(async () => {
     if (token) await api('/api/auth/logout', token, 'POST');
-    await setStoredToken(null); setToken(null); setMe(null); setGroups([]); setGroup(null); setPage('spin');
+    await setStoredToken(null); setToken(null); setMe(null); setGroups([]); setGroup(null); setWatchlistTab('want'); setPage('spin');
   });
   const createGroup = () => perform(async () => {
     const created = await api<Group>('/api/groups', token, 'POST', { name: groupName });
@@ -102,7 +121,7 @@ export default function App() {
   });
   const addItem = (item: Partial<Item>) => perform(async () => {
     await api('/api/watchlist', token, 'POST', item); setWatchlist(await api('/api/watchlist', token));
-    setManualTitle(''); setQuery(''); setSearchResults([]); if (groupId) await refreshGroup(token!, groupId);
+    setManualTitle(''); setQuery(''); setSearchResults([]); setWatchlistTab('want'); if (groupId) await refreshGroup(token!, groupId);
   });
   const changeStatus = (item: Item, status: Status) => perform(async () => {
     await api(`/api/watchlist/${item.id}`, token, 'PATCH', { status }); setWatchlist(await api('/api/watchlist', token)); if (groupId) await refreshGroup(token!, groupId);
@@ -173,8 +192,10 @@ export default function App() {
           {!catalogueConnected && <Text style={s.hint}>Catalogue search needs a TMDB API token. You can add a title manually.</Text>}
           {searchResults.map((r) => <Pressable key={`${r.kind}-${r.tmdbId}`} onPress={() => addItem(r)} style={s.listRow}><Poster title={r.title} path={r.posterPath} size={44} /><View style={{ flex: 1 }}><Text style={s.white}>{r.title}</Text><Text style={s.small}>{kindLabel(r.kind)}{r.year ? ` · ${r.year}` : ''}</Text></View><Text style={s.goldText}>＋</Text></Pressable>)}
           <View style={s.rule} /><Text style={s.label}>Or add your own</Text><Field label="Title" value={manualTitle} onChangeText={setManualTitle} placeholder="Film or series title" /><View style={s.row}><Chip label="Film" active={manualKind === 'movie'} onPress={() => setManualKind('movie')} /><Chip label="Series" active={manualKind === 'series'} onPress={() => setManualKind('series')} /></View><Button label="Add to watchlist" onPress={() => addItem({ title: manualTitle, kind: manualKind })} disabled={!manualTitle.trim() || busy} />
-        </View><Text style={s.section}>Your titles <Text style={s.small}>· {watchlist.length} total, {eligibleOwn} eligible</Text></Text>
-        {!watchlist.length ? <Text style={s.muted}>Your list starts here. Add a film or series above.</Text> : watchlist.map((item) => <View key={item.id} style={s.itemCard}><Poster title={item.title} path={item.posterPath} size={62} /><View style={{ flex: 1, gap: 6 }}><Text style={s.white}>{item.title}</Text><Text style={s.small}>{kindLabel(item.kind)}{item.year ? ` · ${item.year}` : ''}</Text><View style={s.row}>{(['want', 'watching', 'watched'] as Status[]).map((status) => <Chip key={status} label={statusLabel(status)} active={item.status === status} onPress={() => changeStatus(item, status)} />)}</View><Pressable onPress={() => removeItem(item)}><Text style={s.remove}>Remove</Text></Pressable></View></View>)}
+        </View><View style={s.watchlistHeading}><Text style={s.section}>Your titles</Text><Text style={s.small}>{watchlist.length} total · {eligibleOwn} eligible</Text></View>
+        <View style={s.statusTabs}>{watchlistTabs.map((tab) => <Pressable key={tab.status} accessibilityRole="tab" accessibilityState={{ selected: watchlistTab === tab.status }} onPress={() => setWatchlistTab(tab.status)} style={[s.statusTab, watchlistTab === tab.status && s.statusTabActive]}><Text style={[s.statusTabLabel, watchlistTab === tab.status && s.statusTabLabelActive]}>{tab.label}</Text><Text style={[s.statusTabCount, watchlistTab === tab.status && s.statusTabCountActive]}>{watchlistCounts[tab.status]}</Text></Pressable>)}</View>
+        <Text accessibilityLiveRegion="polite" style={s.small}>{watchlistGuidance[watchlistTab]}</Text>
+        {!watchlist.length ? <Text style={s.muted}>Your list starts here. Add a film or series above.</Text> : !visibleWatchlist.length ? <Text style={s.muted}>{watchlistEmpty[watchlistTab]}</Text> : visibleWatchlist.map((item) => <View key={item.id} style={s.itemCard}><Poster title={item.title} path={item.posterPath} size={62} /><View style={{ flex: 1, gap: 6 }}><Text style={s.white}>{item.title}</Text><Text style={s.small}>{kindLabel(item.kind)}{item.year ? ` · ${item.year}` : ''}</Text><View style={s.row}>{(['want', 'watching', 'watched'] as Status[]).map((status) => <Chip key={status} label={statusLabel(status)} active={item.status === status} onPress={() => changeStatus(item, status)} />)}</View><Pressable accessibilityRole="button" onPress={() => removeItem(item)}><Text style={s.remove}>Remove</Text></Pressable></View></View>)}
       </>}
 
       {page === 'groups' && <><Text style={s.eyebrow}>YOUR PEOPLE</Text><Text style={s.title}>Groups</Text><Text style={s.muted}>Keep your own watchlist, share it with the people you watch with.</Text>
@@ -205,6 +226,7 @@ const s = StyleSheet.create({
   brand: { color: '#FFF9F2', fontSize: 19, fontWeight: '900', letterSpacing: 1.4 }, sidebar: { width: 235, backgroundColor: '#1B1A1E', borderRightWidth: 1, borderRightColor: '#343139', padding: 22, paddingTop: 36 }, sideCaption: { color: '#88818B', fontSize: 10, letterSpacing: 2, marginTop: 8, marginBottom: 42 }, sideLink: { padding: 13, flexDirection: 'row', alignItems: 'center', gap: 13, borderRadius: 12, marginBottom: 5 }, sideLinkActive: { backgroundColor: '#37312B' }, sideIcon: { color: gold, fontSize: 21, width: 23 }, sideText: { color: '#B9B1B9', fontSize: 16, fontWeight: '700' }, sideFooter: { color: '#6F6A70', fontSize: 10, marginTop: 'auto' },
   eyebrow: { color: gold, fontWeight: '800', fontSize: 12, letterSpacing: 2.3 }, title: { color: '#FFF9F4', fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', fontSize: 38, lineHeight: 44, fontWeight: '700' }, section: { color: '#FAF7F3', fontSize: 23, fontWeight: '700' }, featuredTitle: { color: '#FFF', fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', fontSize: 34, lineHeight: 39 }, white: { color: '#FAF7F3', fontSize: 16, fontWeight: '700' }, goldText: { color: gold, fontSize: 14, fontWeight: '800' }, muted: { color: '#B9B2B8', fontSize: 15, lineHeight: 22 }, small: { color: '#9B959D', fontSize: 13, lineHeight: 19 }, label: { color: '#E1DADD', fontSize: 14, fontWeight: '700' }, intro: { color: '#C1B7BC', fontSize: 18 }, hint: { color: '#E7C287', fontSize: 14, lineHeight: 21 }, footer: { color: '#88818B', textAlign: 'center', marginTop: 25 },
   card: { backgroundColor: '#1E1D21', borderColor: '#3A363D', borderWidth: 1, borderRadius: 20, padding: 20, gap: 15 }, featured: { backgroundColor: '#2B232A', borderColor: '#6B4E47', borderWidth: 1, borderRadius: 22, padding: 22, gap: 16 }, featuredRow: { flexDirection: 'row', gap: 17, alignItems: 'center' }, row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }, rule: { backgroundColor: '#49434B', height: 1, marginVertical: 4 },
+  watchlistHeading: { flexDirection: 'row', flexWrap: 'wrap', alignItems: 'baseline', justifyContent: 'space-between', gap: 8 }, statusTabs: { flexDirection: 'row', borderRadius: 14, borderWidth: 1, borderColor: '#413D45', backgroundColor: '#1B1A1E', padding: 4, gap: 4 }, statusTab: { flex: 1, minWidth: 0, borderRadius: 10, paddingHorizontal: 8, paddingVertical: 10, alignItems: 'center', justifyContent: 'center', gap: 3 }, statusTabActive: { backgroundColor: '#58472D' }, statusTabLabel: { color: '#AFA8B0', fontSize: 12, fontWeight: '700', textAlign: 'center' }, statusTabLabelActive: { color: '#FFE5B0' }, statusTabCount: { color: '#77717A', fontSize: 11, fontWeight: '800' }, statusTabCountActive: { color: gold },
   memberGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, member: { minWidth: 165, flexBasis: 175, flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: '#29272B', borderWidth: 1, borderColor: '#49444D', borderRadius: 13 }, memberSelected: { borderColor: gold, backgroundColor: '#3A322B' }, avatar: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' }, avatarText: { color: '#201C19', fontSize: 17, fontWeight: '900' }, wheelCard: { backgroundColor: '#211F23', borderRadius: 20, padding: 16, gap: 12, alignItems: 'center' },
   offer: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#48424A', paddingVertical: 10, gap: 10 }, itemCard: { backgroundColor: '#1E1D21', borderColor: '#39353C', borderWidth: 1, borderRadius: 15, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 13 }, listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: '#3C3740', paddingVertical: 9 }, remove: { color: '#DB999D', fontSize: 13, marginTop: 3 }, preview: { backgroundColor: '#363029', borderRadius: 12, padding: 13, gap: 10 }, code: { color: gold, fontSize: 28, fontWeight: '900', letterSpacing: 4 }, memberLine: { flexDirection: 'row', alignItems: 'center', gap: 11 }, historyStar: { color: gold, backgroundColor: '#463621', fontSize: 23, width: 44, height: 44, borderRadius: 22, textAlign: 'center', lineHeight: 44 },
   bottomNav: { flexDirection: 'row', backgroundColor: '#1E1C21', borderTopWidth: 1, borderTopColor: '#3C3840', paddingTop: 8, paddingBottom: Platform.OS === 'ios' ? 20 : 8 }, bottomLink: { flex: 1, alignItems: 'center', gap: 2 }, bottomIcon: { color: '#88828A', fontSize: 22 }, bottomText: { color: '#928B93', fontSize: 11, fontWeight: '700' },
