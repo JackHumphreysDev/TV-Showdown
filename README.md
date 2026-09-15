@@ -6,6 +6,12 @@ The app uses UK English and shows viewing options for the United Kingdom. `Want 
 
 Signed-in invite holders review the group name and current members before explicitly joining. Public invite checks do not expose member profiles, repeat joins safely open the existing group, and invalid, expired or revoked codes provide distinct recovery messages.
 
+Group owners can rename a group or permanently delete it from the Groups screen. Deletion removes the group's memberships, invites and shared spin history while leaving every member's personal watchlist intact.
+
+Group history keeps the complete result timeline for recent rounds. Accepted, skipped, current, re-spun and cancelled outcomes are labelled separately, so a skipped title is never mistaken for the group's final choice.
+
+In a shared group, each member can browse other members’ eligible titles from the Watchlist screen. This view is read-only; watched titles and ineligible `Watching` films remain private to their owners.
+
 ## What is in this repository
 
 - `app/` — one Expo/React Native interface for web, iOS and Android.
@@ -22,14 +28,24 @@ Signed-in invite holders review the group name and current members before explic
 
 The web app defaults to `http://localhost:8081`, and the API to `http://localhost:4000`. Set `APP_ORIGIN` and `PUBLIC_APP_URL` in `.env` if those addresses change. `PUBLIC_APP_URL` is used for invite links.
 
-Run `npm run check` from the repository root to type-check the app and run core API tests. Run `npm --prefix app run build:web` to export the web bundle.
+Run `npm run check` from the repository root to type-check the app and run core API tests. Run `npm run build:web` to export the installable PWA into `app/dist/`.
+
+The PWA manifest and branded icons are included in the export. Its service worker caches only the static app shell for offline launching; it does not cache account data, watchlists, catalogue results or API responses. Reconnect to use shared features. The development server does not register the service worker, so test offline behaviour against a production export on localhost or a suitable HTTPS host.
 
 ## Catalogue and availability
 
-TMDB supplies title search and poster metadata. UK viewing options are provided by JustWatch through TMDB. The TMDB watch-provider endpoint identifies services and access types but does not provide direct links to individual provider titles; **View options on TMDB** opens TMDB's listing for the title. Availability can change. Without a TMDB token, manual watchlist entry and the wheel still work, while search and viewing options show an honest unavailable state.
+TMDB supplies title search and poster metadata. The signed-in catalogue API exposes:
+
+- `GET /api/catalogue?q=...&kind=both|movie|series&page=1` for paginated search or, without `q`, popular catalogue browsing. Each page contains the normalised title, year, type, poster and synopsis, plus `totalPages` and `totalResults` so a client can keep loading until the catalogue window is exhausted.
+- `GET /api/catalogue/{movie|series}/{tmdbId}` for richer title details such as runtime, genres, backdrop and ratings.
+- `GET /api/search?q=...` remains as a compact search response for the watchlist add flow.
+
+The API deliberately pages results rather than attempting to download every film and series into the app. TMDB's catalogue is continuously changing and its API has a finite page window; keep the token on the server and request only the pages needed by the current screen. UK viewing options are provided by JustWatch through TMDB. The TMDB watch-provider endpoint identifies services and access types but does not provide direct links to individual provider titles; **View options on TMDB** opens TMDB's listing for the title. Availability can change. Without a TMDB token, manual watchlist entry and the wheel still work, while catalogue and viewing options return an honest unavailable state.
+
+The app's **Details** action is available from a spin result and each personal watchlist item. Catalogue titles show runtime, genres, synopsis, status and rating where supplied; manually entered titles retain a readable summary without claiming unavailable metadata.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB. A production release must include TMDB's approved logo and comply with TMDB and JustWatch attribution and licensing rules. Do not assume the developer API covers commercial use.
 
 ## Deployment status
 
-This repository is a runnable development build, not a public multi-user service yet. The SQLite API needs a persistent host and HTTPS before real-world use; the web bundle needs hosting; and store builds for iOS/Android require Apple/Google signing and distribution set-up. The app and API deliberately contain no live credentials.
+This repository is a runnable development build, not a public multi-user service yet. The SQLite API needs a persistent host and HTTPS before real-world use; the PWA export needs hosting; and store builds for iOS/Android require Apple/Google signing and distribution set-up. The app and API deliberately contain no live credentials.
