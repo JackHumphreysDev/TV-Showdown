@@ -36,6 +36,8 @@ TMDB supplies title search and poster metadata. The signed-in catalogue API expo
 
 The API deliberately pages results rather than attempting to download every film and series into the app. TMDB's catalogue is continuously changing and its API has a finite page window; keep the token on the server and request only the pages needed by the current screen. UK viewing options are provided by JustWatch through TMDB. The TMDB watch-provider endpoint identifies services and access types but does not provide direct links to individual provider titles; **View options on TMDB** opens TMDB's listing for the title. Availability can change. Without a TMDB token, manual watchlist entry and the wheel still work, while catalogue and viewing options return an honest unavailable state.
 
+The app's **Details** action is available from a spin result and each personal watchlist item. Catalogue titles show runtime, genres, synopsis, status and rating where supplied; manually entered titles retain a readable summary without claiming unavailable metadata.
+
 This product uses the TMDB API but is not endorsed or certified by TMDB. A production release must include TMDB's approved logo and comply with TMDB and JustWatch attribution and licensing rules. Do not assume the developer API covers commercial use.
 
 ## Deployment status

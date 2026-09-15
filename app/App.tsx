@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, Share, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { api, Availability, CatalogueResponse, getToken, Group, HistoryRow, Item, Kind, Me, SearchResult, setStoredToken, Spin, Status } from './src/api';
+import { ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, ScrollView, Share, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { api, Availability, CatalogueDetailsResponse, CatalogueResponse, CatalogueTitle, getToken, Group, HistoryRow, Item, Kind, Me, SearchResult, setStoredToken, Spin, Status } from './src/api';
 import { Button, Chip, Field, gold, kindLabel, Poster, Wheel } from './src/ui';
 
 type Page = 'spin' | 'watchlist' | 'groups' | 'history' | 'profile';
+type DisplayTitle = Pick<Item, 'title' | 'kind' | 'year' | 'tmdbId' | 'posterPath' | 'overview'> & Partial<Pick<CatalogueTitle, 'runtime' | 'genres' | 'backdropPath' | 'voteAverage' | 'voteCount' | 'status'>>;
 const nav: { page: Page; label: string; icon: string }[] = [
   { page: 'spin', label: 'Spin', icon: '◉' }, { page: 'watchlist', label: 'Watchlist', icon: '▤' },
   { page: 'groups', label: 'Groups', icon: '◎' }, { page: 'history', label: 'History', icon: '◷' }, { page: 'profile', label: 'Profile', icon: '◌' },
@@ -26,6 +27,7 @@ export default function App() {
   const [viewedProfileId, setViewedProfileId] = useState<string | null>(null);
   const [query, setQuery] = useState(''), [searchResults, setSearchResults] = useState<SearchResult[]>([]), [catalogueConnected, setCatalogueConnected] = useState(true), [cataloguePage, setCataloguePage] = useState(0), [catalogueTotalPages, setCatalogueTotalPages] = useState(0);
   const [manualTitle, setManualTitle] = useState(''), [manualKind, setManualKind] = useState<Kind>('movie'), [profileName, setProfileName] = useState('');
+  const [showDetails, setShowDetails] = useState(false), [detailTitle, setDetailTitle] = useState<DisplayTitle | null>(null), [detailsLoading, setDetailsLoading] = useState(false), [detailsConnected, setDetailsConnected] = useState(true);
 
   const perform = async (action: () => Promise<void>) => { setError(''); setBusy(true); try { await action(); } catch (e) { setError(e instanceof Error ? e.message : 'Something went wrong'); } finally { setBusy(false); } };
   const refreshBase = useCallback(async (t: string) => {
@@ -84,6 +86,7 @@ export default function App() {
     setToken(null); setMe(null); setGroups([]); setGroupId(null); setGroup(null);
     setWatchlist([]); setSpin(null); setHistory([]); setSelected([]); setViewedProfileId(null);
     setInvite(null); setSearchResults([]); setOptions(null); setShowOptions(false); setPage('spin');
+    setShowDetails(false);
   });
   const createGroup = () => perform(async () => {
     const created = await api<Group>('/api/groups', token, 'POST', { name: groupName });
@@ -153,6 +156,18 @@ export default function App() {
     setShowOptions(true); if (!spin?.result.tmdbId) { setOptions({ configured: true, offers: [] }); return; }
     setOptions(await api<Availability>(`/api/availability?kind=${spin.result.kind}&tmdbId=${spin.result.tmdbId}`, token));
   });
+  const openTitleDetails = async (item: DisplayTitle) => {
+    setShowDetails(true); setDetailTitle(item); setDetailsConnected(true); setDetailsLoading(Boolean(item.tmdbId)); setError('');
+    if (!item.tmdbId) return;
+    try {
+      const result = await api<CatalogueDetailsResponse>(`/api/catalogue/${item.kind}/${item.tmdbId}`, token);
+      setDetailsConnected(result.configured);
+      if (result.title) setDetailTitle(result.title);
+    } catch (e) {
+      setDetailsConnected(false);
+      setError(e instanceof Error ? e.message : 'Title details could not be loaded');
+    } finally { setDetailsLoading(false); }
+  };
 
   if (booting) return <View style={s.boot}><ActivityIndicator color={gold} /><Text style={s.brand}>TV SHOWDOWN</Text></View>;
   if (!token) return <View style={s.root}><StatusBar barStyle="light-content" /><ScrollView contentContainerStyle={s.authContent}>
@@ -180,7 +195,7 @@ export default function App() {
         {!group ? <View style={s.card}><Text style={s.section}>Bring everyone together</Text><Text style={s.muted}>Create a group or join one with a room code. Then add a few titles to your watchlist.</Text><Button label="Go to groups" onPress={() => setPage('groups')} /></View> : <>
           {spin && !animating && <View style={s.featured}><Text style={s.eyebrow}>{spin.state === 'accepted' ? 'TONIGHT’S PICK' : 'THE WHEEL HAS SPOKEN'}</Text><Text style={s.goldText}>{spin.result.profile_name}’s pick</Text>
             <View style={s.featuredRow}><Poster title={spin.result.title} path={spin.result.posterPath} size={105} /><View style={{ flex: 1 }}><Text style={s.featuredTitle}>{spin.result.title}</Text><Text style={s.muted}>{kindLabel(spin.result.kind)}{spin.result.year ? ` · ${spin.result.year}` : ''}</Text><Text style={s.small} numberOfLines={4}>{spin.result.overview || 'From the winning watchlist.'}</Text></View></View>
-            {spin.state === 'active' ? <View style={s.row}><Button label="Watch this" onPress={viewOptions} disabled={busy} /><Button label="Skip title" quiet onPress={() => spinAction('skip')} disabled={!spin.canSkip || busy} /></View> : <Text style={s.goldText}>✓ Saved as tonight’s pick</Text>}
+            {spin.state === 'active' ? <View style={s.row}><Button label="Watch this" onPress={viewOptions} disabled={busy} /><Button label="Details" quiet onPress={() => openTitleDetails(spin.result)} /><Button label="Skip title" quiet onPress={() => spinAction('skip')} disabled={!spin.canSkip || busy} /></View> : <><Text style={s.goldText}>✓ Saved as tonight’s pick</Text><Button label="Details" quiet onPress={() => openTitleDetails(spin.result)} /></>}
           </View>}
           {showOptions && <View style={s.card}><Text style={s.eyebrow}>UNITED KINGDOM</Text><Text style={s.section}>Where to watch</Text>
             {!options ? <ActivityIndicator color={gold} /> : !options.configured ? <Text style={s.muted}>Viewing options are not connected yet. Add a TMDB API token to enable UK availability.</Text> : options.offers.length ? <><Text style={s.muted}>JustWatch data via TMDB. Check the service before paying or subscribing.</Text>{options.offers.map((o, i) => <View key={`${o.provider}-${o.accessType}-${i}`} style={s.offer}><Text style={s.white}>{o.provider}</Text><Text style={s.goldText}>{o.accessType}</Text></View>)}{options.checkedAt && <Text style={s.small}>Checked {new Date(options.checkedAt).toLocaleString('en-GB')}</Text>}{options.link && <Button label="View options on TMDB" onPress={() => { Linking.openURL(options.link!); spinAction('accept'); }} />}</> : <Text style={s.muted}>No verified viewing options found in the United Kingdom. You can still save this pick.</Text>}
@@ -202,7 +217,7 @@ export default function App() {
           {cataloguePage > 0 && cataloguePage < catalogueTotalPages && <Button label="Load more catalogue results" quiet onPress={() => loadCatalogue(cataloguePage + 1, true)} disabled={busy} />}
           <View style={s.rule} /><Text style={s.label}>Or add your own</Text><Field label="Title" value={manualTitle} onChangeText={setManualTitle} placeholder="Film or series title" /><View style={s.row}><Chip label="Film" active={manualKind === 'movie'} onPress={() => setManualKind('movie')} /><Chip label="Series" active={manualKind === 'series'} onPress={() => setManualKind('series')} /></View><Button label="Add to watchlist" onPress={() => addItem({ title: manualTitle, kind: manualKind })} disabled={!manualTitle.trim() || busy} />
         </View><Text style={s.section}>Your titles <Text style={s.small}>· {watchlist.length} total, {eligibleOwn} eligible</Text></Text>
-        {!watchlist.length ? <Text style={s.muted}>Your list starts here. Add a film or series above.</Text> : watchlist.map((item) => <View key={item.id} style={s.itemCard}><Poster title={item.title} path={item.posterPath} size={62} /><View style={{ flex: 1, gap: 6 }}><Text style={s.white}>{item.title}</Text><Text style={s.small}>{kindLabel(item.kind)}{item.year ? ` · ${item.year}` : ''}</Text><View style={s.row}>{(['want', 'watching', 'watched'] as Status[]).map((status) => <Chip key={status} label={statusLabel(status)} active={item.status === status} onPress={() => changeStatus(item, status)} />)}</View><Pressable onPress={() => removeItem(item)}><Text style={s.remove}>Remove</Text></Pressable></View></View>)}
+        {!watchlist.length ? <Text style={s.muted}>Your list starts here. Add a film or series above.</Text> : watchlist.map((item) => <View key={item.id} style={s.itemCard}><Poster title={item.title} path={item.posterPath} size={62} /><View style={{ flex: 1, gap: 6 }}><Text style={s.white}>{item.title}</Text><Text style={s.small}>{kindLabel(item.kind)}{item.year ? ` · ${item.year}` : ''}</Text><View style={s.row}>{(['want', 'watching', 'watched'] as Status[]).map((status) => <Chip key={status} label={statusLabel(status)} active={item.status === status} onPress={() => changeStatus(item, status)} />)}</View><View style={s.row}><Pressable accessibilityRole="button" onPress={() => openTitleDetails(item)}><Text style={s.goldText}>Details</Text></Pressable><Pressable accessibilityRole="button" onPress={() => removeItem(item)}><Text style={s.remove}>Remove</Text></Pressable></View></View></View>)}
         {group && <View style={s.card}><Text style={s.eyebrow}>{group.name.toUpperCase()}</Text><Text style={s.section}>Group watchlists</Text><Text style={s.muted}>Browse titles your group can include in the wheel. Only the list owner can make changes.</Text>
           {!sharedMembers.length ? <Text style={s.hint}>Invite someone to this group to see their eligible titles here.</Text> : <>
             <View style={s.row}>{sharedMembers.map((member) => <Chip key={member.profileId} label={`${member.name} · ${groupItems.filter((item) => item.profileId === member.profileId).length}`} active={viewedMember?.profileId === member.profileId} onPress={() => setViewedProfileId(member.profileId)} />)}</View>
@@ -232,7 +247,17 @@ export default function App() {
     </ScrollView>
       {!desktop && <View style={s.bottomNav}>{nav.map((n) => <Pressable key={n.page} accessibilityRole="tab" accessibilityState={{ selected: page === n.page }} onPress={() => { setPage(n.page); setError(''); }} style={s.bottomLink}><Text style={[s.bottomIcon, page === n.page && { color: gold }]}>{n.icon}</Text><Text style={[s.bottomText, page === n.page && { color: gold }]}>{n.label}</Text></Pressable>)}</View>}
     </View>
-  </View></View>;
+  </View>
+    <Modal visible={showDetails} transparent animationType="fade" onRequestClose={() => setShowDetails(false)}>
+      <View style={s.modalBackdrop}><ScrollView contentContainerStyle={s.modalScroll}><View accessibilityViewIsModal style={s.modalCard}>
+        <Text style={s.eyebrow}>TITLE DETAILS</Text>
+        {detailTitle && <><View style={s.detailHero}><Poster title={detailTitle.title} path={detailTitle.posterPath} size={118} /><View style={s.detailHeading}><Text style={s.detailTitle}>{detailTitle.title}</Text><Text style={s.muted}>{kindLabel(detailTitle.kind)}{detailTitle.year ? ` · ${detailTitle.year}` : ''}</Text>{detailTitle.voteAverage != null && <Text style={s.goldText}>★ {detailTitle.voteAverage.toFixed(1)}{detailTitle.voteCount ? ` · ${detailTitle.voteCount.toLocaleString('en-GB')} votes` : ''}</Text>}</View></View>
+          {detailsLoading ? <ActivityIndicator color={gold} /> : <>{!detailsConnected && <Text style={s.hint}>Live catalogue details are not connected. Showing the metadata already saved with this title.</Text>}{!detailTitle.tmdbId && <Text style={s.hint}>This title was added manually, so extended catalogue details are unavailable.</Text>}{detailTitle.overview ? <Text style={s.detailOverview}>{detailTitle.overview}</Text> : <Text style={s.muted}>No synopsis is available for this title.</Text>}<View style={s.detailFacts}>{detailTitle.runtime ? <Text style={s.detailFact}>{detailTitle.kind === 'series' ? 'Typical episode' : 'Runtime'} · {detailTitle.runtime} mins</Text> : null}{detailTitle.status ? <Text style={s.detailFact}>Catalogue status · {detailTitle.status}</Text> : null}</View>{detailTitle.genres?.length ? <View style={s.row}>{detailTitle.genres.map((genre) => <View key={genre} style={s.genre}><Text style={s.genreText}>{genre}</Text></View>)}</View> : null}</>}
+        </>}
+        <Button label="Close details" quiet onPress={() => setShowDetails(false)} />
+      </View></ScrollView></View>
+    </Modal>
+  </View>;
 }
 
 const s = StyleSheet.create({
@@ -242,6 +267,7 @@ const s = StyleSheet.create({
   card: { backgroundColor: '#1E1D21', borderColor: '#3A363D', borderWidth: 1, borderRadius: 20, padding: 20, gap: 15 }, featured: { backgroundColor: '#2B232A', borderColor: '#6B4E47', borderWidth: 1, borderRadius: 22, padding: 22, gap: 16 }, featuredRow: { flexDirection: 'row', gap: 17, alignItems: 'center' }, row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }, rule: { backgroundColor: '#49434B', height: 1, marginVertical: 4 },
   memberGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, member: { minWidth: 165, flexBasis: 175, flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: '#29272B', borderWidth: 1, borderColor: '#49444D', borderRadius: 13 }, memberSelected: { borderColor: gold, backgroundColor: '#3A322B' }, avatar: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' }, avatarText: { color: '#201C19', fontSize: 17, fontWeight: '900' }, wheelCard: { backgroundColor: '#211F23', borderRadius: 20, padding: 16, gap: 12, alignItems: 'center' },
   offer: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#48424A', paddingVertical: 10, gap: 10 }, itemCard: { backgroundColor: '#1E1D21', borderColor: '#39353C', borderWidth: 1, borderRadius: 15, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 13 }, listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: '#3C3740', paddingVertical: 9 }, remove: { color: '#DB999D', fontSize: 13, marginTop: 3 }, preview: { backgroundColor: '#363029', borderRadius: 12, padding: 13, gap: 10 }, code: { color: gold, fontSize: 28, fontWeight: '900', letterSpacing: 4 }, memberLine: { flexDirection: 'row', alignItems: 'center', gap: 11 }, historyStar: { color: gold, backgroundColor: '#463621', fontSize: 23, width: 44, height: 44, borderRadius: 22, textAlign: 'center', lineHeight: 44 },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(8,8,11,.86)', justifyContent: 'center', padding: 18 }, modalScroll: { flexGrow: 1, justifyContent: 'center' }, modalCard: { width: '100%', maxWidth: 650, alignSelf: 'center', backgroundColor: '#211F23', borderColor: '#5A5056', borderWidth: 1, borderRadius: 22, padding: 22, gap: 17 }, detailHero: { flexDirection: 'row', alignItems: 'center', gap: 18 }, detailHeading: { flex: 1, gap: 8 }, detailTitle: { color: '#FFF9F2', fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', fontSize: 31, lineHeight: 36, fontWeight: '700' }, detailOverview: { color: '#D1C9CE', fontSize: 15, lineHeight: 23 }, detailFacts: { gap: 7, borderTopWidth: 1, borderTopColor: '#49434B', paddingTop: 13 }, detailFact: { color: '#E0DADF', fontSize: 14, fontWeight: '700' }, genre: { backgroundColor: '#44392B', borderColor: '#705C3D', borderWidth: 1, borderRadius: 20, paddingHorizontal: 11, paddingVertical: 7 }, genreText: { color: '#F2D299', fontSize: 12, fontWeight: '800' },
   bottomNav: { flexDirection: 'row', backgroundColor: '#1E1C21', borderTopWidth: 1, borderTopColor: '#3C3840', paddingTop: 8, paddingBottom: Platform.OS === 'ios' ? 20 : 8 }, bottomLink: { flex: 1, alignItems: 'center', gap: 2 }, bottomIcon: { color: '#88828A', fontSize: 22 }, bottomText: { color: '#928B93', fontSize: 11, fontWeight: '700' },
   errorBox: { backgroundColor: '#4F3033', borderColor: '#9A6063', borderWidth: 1, borderRadius: 10, padding: 12 }, error: { color: '#FFCECF', fontSize: 14 }, authContent: { flexGrow: 1, width: '100%', maxWidth: 540, alignSelf: 'center', justifyContent: 'center', padding: 25, gap: 20 }, authTitle: { color: '#FFFAF3', fontSize: 72, lineHeight: 74, fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif' },
 });
