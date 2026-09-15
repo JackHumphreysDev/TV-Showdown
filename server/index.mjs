@@ -71,7 +71,12 @@ function sessionView(session) {
   return {
     id: session.id, state: session.state, filter: session.filter, version: session.version,
     winnerProfileId: session.winner_profile_id, selectedProfiles: JSON.parse(session.selected_profiles),
-    result: result && { ...result, tmdbId: result.tmdb_id, posterPath: result.poster_path },
+    result: result && {
+      ...result,
+      watchlistItemId: result.watchlist_item_id,
+      tmdbId: result.tmdb_id,
+      posterPath: result.poster_path,
+    },
     canSkip: session.state === 'active' && snapshot[session.winner_profile_id].some((item) => !seen.includes(item.id)),
     createdAt: session.created_at,
   };

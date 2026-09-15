@@ -53,7 +53,7 @@ assert.equal(joinedPreview.alreadyMember, true);
 assert.deepEqual(joinedPreview.members.map((member) => member.name).sort(), ['Rachel', 'Regis']);
 await expectStatus(`/api/groups/${group.id}`, regis.token, 403, 'PATCH', { name: 'Not allowed' });
 await expectStatus(`/api/groups/${group.id}`, regis.token, 403, 'DELETE');
-await call('/api/watchlist', rachel.token, 'POST', { title: 'Rachel film', kind: 'movie' });
+const rachelFilm = await call('/api/watchlist', rachel.token, 'POST', { title: 'Rachel film', kind: 'movie' });
 await call('/api/watchlist', rachel.token, 'POST', { title: 'Rachel series one', kind: 'series' });
 await call('/api/watchlist', rachel.token, 'POST', { title: 'Rachel series two', kind: 'series' });
 const watchedFilm = await call('/api/watchlist', rachel.token, 'POST', { title: 'Rachel watched film', kind: 'movie' });
@@ -87,6 +87,18 @@ const accepted = await call(`/api/groups/${group.id}/accept`, regis.token, 'POST
 assert.equal(accepted.state, 'accepted');
 const history = await call(`/api/groups/${group.id}/history`, rachel.token);
 assert.equal(history[0].resultState, 'accepted');
+const watchedResult = await call(`/api/groups/${group.id}/spin`, rachel.token, 'POST', {
+  selectedProfileIds: [rachelMe.profile_id], filter: 'movie', idempotencyKey: `watched-${suffix}`,
+});
+assert.equal(watchedResult.result.watchlistItemId, rachelFilm.id);
+await expectStatus(`/api/watchlist/${watchedResult.result.watchlistItemId}`, regis.token, 404, 'PATCH', { status: 'watched' });
+await call(`/api/watchlist/${watchedResult.result.watchlistItemId}`, rachel.token, 'PATCH', { status: 'watched' });
+const updatedList = await call('/api/watchlist', rachel.token);
+assert.equal(updatedList.find((item) => item.id === rachelFilm.id).status, 'watched');
+const updatedGroup = await call(`/api/groups/${group.id}`, regis.token);
+assert(!updatedGroup.watchlists.some((item) => item.id === rachelFilm.id));
+const current = await call(`/api/groups/${group.id}/current`, regis.token);
+assert.equal(current.result.watchlistItemId, rachelFilm.id);
 const revokedInvite = await call(`/api/groups/${group.id}/invite`, rachel.token, 'POST');
 await call(`/api/groups/${group.id}/invites`, rachel.token, 'DELETE');
 const revokedError = await callError(`/api/invites/${revokedInvite.code}`, regis.token, 410);
