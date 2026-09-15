@@ -4,6 +4,8 @@ TV Showdown is a shared film-night decision app for web, iOS and Android. Each p
 
 The app uses UK English and shows viewing options for the United Kingdom. `Want to watch` films and series, and `Watching` series, are eligible for the wheel.
 
+Group owners can rename a group or permanently delete it from the Groups screen. Deletion removes the group's memberships, invites and shared spin history while leaving every member's personal watchlist intact.
+
 ## What is in this repository
 
 - `app/` — one Expo/React Native interface for web, iOS and Android.

@@ -22,6 +22,7 @@ export default function App() {
   const [animating, setAnimating] = useState(false), [showOptions, setShowOptions] = useState(false), [options, setOptions] = useState<Availability | null>(null);
   const [authMode, setAuthMode] = useState<'register' | 'login'>('register'), [email, setEmail] = useState(''), [password, setPassword] = useState(''), [name, setName] = useState('');
   const [groupName, setGroupName] = useState(''), [roomCode, setRoomCode] = useState(''), [preview, setPreview] = useState<{ name: string; memberCount: number } | null>(null);
+  const [groupEditName, setGroupEditName] = useState('');
   const [invite, setInvite] = useState<{ code: string; link: string; expiresInDays: number } | null>(null);
   const [query, setQuery] = useState(''), [searchResults, setSearchResults] = useState<SearchResult[]>([]), [catalogueConnected, setCatalogueConnected] = useState(true);
   const [manualTitle, setManualTitle] = useState(''), [manualKind, setManualKind] = useState<Kind>('movie'), [profileName, setProfileName] = useState('');
@@ -56,6 +57,7 @@ export default function App() {
     const timer = setInterval(() => refreshGroup(token, groupId).catch(() => {}), 10000);
     return () => clearInterval(timer);
   }, [token, groupId, refreshGroup]);
+  useEffect(() => { setGroupEditName(group?.name || ''); }, [group?.id, group?.name]);
   const members = group?.members || [], groupItems = group?.watchlists || [];
   const chosenMembers = useMemo(() => members.filter((m) => selected.includes(m.profileId)), [members, selected]);
   const canSpin = chosenMembers.length > 0 && chosenMembers.every((m) => groupItems.some((i) => i.profileId === m.profileId && (filter === 'both' || i.kind === filter)));
@@ -94,6 +96,15 @@ export default function App() {
   }));
   const leaveGroup = () => confirmAction(`Leave ${group?.name}?`, 'You will lose access to its spins and history, but keep your own watchlist.', () => perform(async () => {
     await api(`/api/groups/${groupId}/members/me`, token, 'DELETE'); setGroup(null); setInvite(null); await refreshBase(token!);
+  }));
+  const renameGroup = () => perform(async () => {
+    if (!groupId || group?.role !== 'owner') return;
+    const updated = await api<Group>(`/api/groups/${groupId}`, token, 'PATCH', { name: groupEditName });
+    setGroup(updated); await refreshBase(token!);
+  });
+  const deleteGroup = () => confirmAction(`Delete ${group?.name}?`, 'This permanently removes the group, its invites and its spin history. Members keep their personal watchlists.', () => perform(async () => {
+    if (!groupId || group?.role !== 'owner') return;
+    await api(`/api/groups/${groupId}`, token, 'DELETE'); setGroup(null); setInvite(null); setSpin(null); setHistory([]); setSelected([]); await refreshBase(token!);
   }));
   const search = () => perform(async () => {
     if (query.trim().length < 2) throw new Error('Enter at least two letters to search');
@@ -185,7 +196,7 @@ export default function App() {
         {group && <View style={s.card}><Text style={s.section}>{group.name}</Text>{members.map((m) => <View key={m.accountId} style={s.memberLine}><View style={[s.avatar, { backgroundColor: m.colour || gold }]}><Text style={s.avatarText}>{m.name[0].toUpperCase()}</Text></View><View style={{ flex: 1 }}><Text style={s.white}>{m.name}</Text>{m.role === 'owner' && <Text style={s.small}>Owner</Text>}</View>
           {group.role === 'owner' && m.accountId !== me?.id && <View style={s.row}><Pressable onPress={() => transferOwnership(m.accountId, m.name)}><Text style={s.goldText}>Make owner</Text></Pressable><Pressable onPress={() => removeMember(m.accountId, m.name)}><Text style={s.remove}>Remove</Text></Pressable></View>}
         </View>)}
-          {group.role === 'owner' ? <><View style={s.rule} /><Button label="Create invite link & room code" onPress={createInvite} disabled={busy} />{invite && <View style={s.preview}><Text style={s.eyebrow}>ROOM CODE · EXPIRES IN 7 DAYS</Text><Text selectable style={s.code}>{invite.code}</Text><Text selectable style={s.small}>{invite.link}</Text><Button label="Share invite" quiet onPress={() => { Share.share({ message: `Join my TV Showdown group: ${invite.link}\nRoom code: ${invite.code}` }); }} /></View>}<Button label="Revoke all invites" quiet onPress={revokeInvites} disabled={busy} /></> : <><View style={s.rule} /><Button label="Leave group" quiet onPress={leaveGroup} disabled={busy} /></>}
+          {group.role === 'owner' ? <><View style={s.rule} /><Text style={s.label}>Group settings</Text><Field label="Group name" value={groupEditName} onChangeText={setGroupEditName} placeholder="Friday film club" /><Button label="Save group name" quiet onPress={renameGroup} disabled={!groupEditName.trim() || groupEditName.trim() === group.name || busy} /><View style={s.rule} /><Button label="Create invite link & room code" onPress={createInvite} disabled={busy} />{invite && <View style={s.preview}><Text style={s.eyebrow}>ROOM CODE · EXPIRES IN 7 DAYS</Text><Text selectable style={s.code}>{invite.code}</Text><Text selectable style={s.small}>{invite.link}</Text><Button label="Share invite" quiet onPress={() => { Share.share({ message: `Join my TV Showdown group: ${invite.link}\nRoom code: ${invite.code}` }); }} /></View>}<Button label="Revoke all invites" quiet onPress={revokeInvites} disabled={busy} /><View style={s.rule} /><Text style={s.small}>Deleting a group also removes its invites and shared spin history. Personal watchlists are not affected.</Text><Pressable accessibilityRole="button" disabled={busy} onPress={deleteGroup} style={[s.dangerButton, busy && { opacity: .4 }]}><Text style={s.dangerButtonText}>Delete group</Text></Pressable></> : <><View style={s.rule} /><Button label="Leave group" quiet onPress={leaveGroup} disabled={busy} /></>}
         </View>}
       </>}
 
@@ -208,5 +219,6 @@ const s = StyleSheet.create({
   memberGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, member: { minWidth: 165, flexBasis: 175, flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: '#29272B', borderWidth: 1, borderColor: '#49444D', borderRadius: 13 }, memberSelected: { borderColor: gold, backgroundColor: '#3A322B' }, avatar: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' }, avatarText: { color: '#201C19', fontSize: 17, fontWeight: '900' }, wheelCard: { backgroundColor: '#211F23', borderRadius: 20, padding: 16, gap: 12, alignItems: 'center' },
   offer: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#48424A', paddingVertical: 10, gap: 10 }, itemCard: { backgroundColor: '#1E1D21', borderColor: '#39353C', borderWidth: 1, borderRadius: 15, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 13 }, listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: '#3C3740', paddingVertical: 9 }, remove: { color: '#DB999D', fontSize: 13, marginTop: 3 }, preview: { backgroundColor: '#363029', borderRadius: 12, padding: 13, gap: 10 }, code: { color: gold, fontSize: 28, fontWeight: '900', letterSpacing: 4 }, memberLine: { flexDirection: 'row', alignItems: 'center', gap: 11 }, historyStar: { color: gold, backgroundColor: '#463621', fontSize: 23, width: 44, height: 44, borderRadius: 22, textAlign: 'center', lineHeight: 44 },
   bottomNav: { flexDirection: 'row', backgroundColor: '#1E1C21', borderTopWidth: 1, borderTopColor: '#3C3840', paddingTop: 8, paddingBottom: Platform.OS === 'ios' ? 20 : 8 }, bottomLink: { flex: 1, alignItems: 'center', gap: 2 }, bottomIcon: { color: '#88828A', fontSize: 22 }, bottomText: { color: '#928B93', fontSize: 11, fontWeight: '700' },
+  dangerButton: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', borderWidth: 1, borderColor: '#8D5559', backgroundColor: '#412A2D', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10 }, dangerButtonText: { color: '#FFBFC2', fontSize: 14, fontWeight: '800' },
   errorBox: { backgroundColor: '#4F3033', borderColor: '#9A6063', borderWidth: 1, borderRadius: 10, padding: 12 }, error: { color: '#FFCECF', fontSize: 14 }, authContent: { flexGrow: 1, width: '100%', maxWidth: 540, alignSelf: 'center', justifyContent: 'center', padding: 25, gap: 20 }, authTitle: { color: '#FFFAF3', fontSize: 72, lineHeight: 74, fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif' },
 });
