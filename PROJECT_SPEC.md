@@ -118,6 +118,8 @@
 ### Search and metadata
 
 - Search results show title, year, type, and poster where available so remakes and similarly named titles are distinguishable.
+- The server exposes a paginated catalogue endpoint for movie and series search or popular browsing, with `page`, `totalPages`, and `totalResults` metadata. Clients load pages on demand; they do not attempt to copy the entire external catalogue into a device or local database.
+- A title-details endpoint can load richer runtime, genres, backdrop, and rating metadata after a user selects a result.
 - A provider's title identifier is stored separately from a person's watchlist item. A catalogue title can be refreshed without overwriting user status or notes.
 - If metadata cannot be loaded, the item's typed title remains usable for spinning. Posters and backdrops use accessible placeholders.
 - Metadata, artwork, attribution, and caching must comply with the chosen provider's license and terms before launch.
@@ -218,4 +220,4 @@ Persist identifiers rather than copying the entire catalogue record into a watch
 
 - United Kingdom is the first viewing-availability region; the interface uses UK English.
 - TMDB provides catalogue metadata and UK availability supplied by JustWatch in the development build. Attribution and commercial licensing must be checked before public launch. This source currently supplies a TMDB viewing-options link, not direct provider-title links.
-- One Expo codebase targets web, iOS and Android. Web has been exported and locally tested; native device tests, signing and distribution are still release checkpoints. The web build has not yet been assessed or packaged as an installable PWA.
+- One Expo codebase targets web, iOS and Android. The web export now includes an installable PWA manifest, icons and an offline static shell; public hosting and installability checks on target browsers remain. Native device tests, signing and distribution are still release checkpoints.
