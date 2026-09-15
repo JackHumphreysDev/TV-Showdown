@@ -26,7 +26,9 @@ async function expectStatus(path, token, expected, method = 'GET', body) {
     headers: { 'Content-Type': 'application/json', ...(token ? { Authorization: `Bearer ${token}` } : {}) },
     body: body ? JSON.stringify(body) : undefined,
   });
-  assert.equal(response.status, expected, `${method} ${path} should return ${expected}`);
+  const data = await response.json();
+  assert.equal(response.status, expected, `${method} ${path}: ${JSON.stringify(data)}`);
+  return data;
 }
 const suffix = randomUUID().slice(0, 8);
 const password = `test-password-${suffix}-only`;
@@ -48,6 +50,12 @@ const preview = await call(`/api/invites/${invite.code}`, regis.token);
 assert.equal(preview.alreadyMember, false);
 assert.deepEqual(preview.members.map((member) => member.name), ['Rachel']);
 await call('/api/groups/join', regis.token, 'POST', { code: invite.code });
+const profileColour = '#A997CE';
+const colouredProfile = await call('/api/me', rachel.token, 'PATCH', { colour: profileColour });
+assert.equal(colouredProfile.colour, profileColour);
+const renamedProfile = await call('/api/me', rachel.token, 'PATCH', { name: 'Rachel' });
+assert.equal(renamedProfile.colour, profileColour);
+await expectStatus('/api/me', rachel.token, 400, 'PATCH', { colour: '#FFFFFF' });
 const joinedPreview = await call(`/api/invites/${invite.code}`, regis.token);
 assert.equal(joinedPreview.alreadyMember, true);
 assert.deepEqual(joinedPreview.members.map((member) => member.name).sort(), ['Rachel', 'Regis']);
@@ -66,6 +74,7 @@ await call('/api/watchlist', regis.token, 'POST', { title: 'Regis series two', k
 await call(`/api/watchlist/${regisSeries.id}`, regis.token, 'PATCH', { status: 'watching' });
 const details = await call(`/api/groups/${group.id}`, regis.token);
 assert.equal(details.members.length, 2);
+assert.equal(details.members.find((member) => member.accountId === rachelMe.id).colour, profileColour);
 assert.equal(details.watchlists.length, 6);
 assert(details.watchlists.some((item) => item.title === 'Rachel film'));
 assert(details.watchlists.some((item) => item.title === 'Regis series one' && item.status === 'watching'));

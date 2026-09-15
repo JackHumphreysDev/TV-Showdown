@@ -4,6 +4,8 @@ TV Showdown is a shared film-night decision app for web, iOS and Android. Each p
 
 The app uses UK English and shows viewing options for the United Kingdom. `Want to watch` films and series, and `Watching` series, are eligible for the wheel.
 
+Each person can choose a profile colour. It is used for their group avatar and wheel segment, keeping their identity consistent throughout a shared session.
+
 The winning watchlist owner can mark the result as watched directly from the result card. Other group members cannot change that person’s watchlist, and accepting a result still does not mark it watched automatically.
 
 Signed-in invite holders review the group name and current members before explicitly joining. Public invite checks do not expose member profiles, repeat joins safely open the existing group, and invalid, expired or revoked codes provide distinct recovery messages.
