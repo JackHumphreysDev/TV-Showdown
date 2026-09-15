@@ -2,6 +2,7 @@ import http from 'node:http';
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { db, transaction } from './db.mjs';
 import { eligible, draw, inviteCode } from './core.mjs';
+import { inviteProblem } from './invites.mjs';
 import { searchTitles, availability } from './tmdb.mjs';
 
 const port = Number(process.env.PORT || 4000);
@@ -154,12 +155,23 @@ async function route(request) {
   if (method === 'GET' && path.startsWith('/api/invites/')) {
     limitInviteAttempts(request);
     const code = decodeURIComponent(path.slice('/api/invites/'.length)).toUpperCase();
-    const invite = one(`SELECT g.id AS groupId, g.name, COUNT(m.account_id) AS memberCount FROM invites i
+    const invite = one(`SELECT g.id AS groupId, g.name, COUNT(m.account_id) AS memberCount,
+      i.revoked_at AS revokedAt, i.expires_at <= datetime('now') AS expired FROM invites i
       JOIN groups g ON g.id=i.group_id JOIN memberships m ON m.group_id=g.id
-      WHERE i.code_hash=? AND i.revoked_at IS NULL AND i.expires_at > datetime('now')
+      WHERE i.code_hash=?
       GROUP BY g.id`, hash(code));
-    if (!invite) fail(404, 'This invite is invalid or has expired');
-    return invite;
+    const problem = inviteProblem(invite);
+    if (problem) fail(problem.status, problem.message);
+    const preview = { groupId: invite.groupId, name: invite.name, memberCount: invite.memberCount };
+    if (!request.headers.authorization) return preview;
+    const viewer = auth(request);
+    return {
+      ...preview,
+      alreadyMember: Boolean(one('SELECT 1 FROM memberships WHERE group_id=? AND account_id=?', invite.groupId, viewer.id)),
+      members: all(`SELECT p.id AS profileId, p.name, p.colour, m.role
+        FROM memberships m JOIN profiles p ON p.account_id=m.account_id
+        WHERE m.group_id=? ORDER BY m.joined_at`, invite.groupId),
+    };
   }
 
   const me = auth(request);
@@ -191,11 +203,12 @@ async function route(request) {
     limitInviteAttempts(request);
     const data = await body(request);
     const code = requiredText(data.code, 'Room code', 30).toUpperCase();
-    const invite = one(`SELECT group_id FROM invites WHERE code_hash=? AND revoked_at IS NULL
-      AND expires_at > datetime('now')`, hash(code));
-    if (!invite) fail(404, 'This invite is invalid or has expired');
-    run("INSERT OR IGNORE INTO memberships(group_id,account_id,role) VALUES(?,?,'member')", invite.group_id, me.id);
-    return groupDetails(invite.group_id, me.id);
+    const invite = one(`SELECT group_id AS groupId, revoked_at AS revokedAt,
+      expires_at <= datetime('now') AS expired FROM invites WHERE code_hash=?`, hash(code));
+    const problem = inviteProblem(invite);
+    if (problem) fail(problem.status, problem.message);
+    run("INSERT OR IGNORE INTO memberships(group_id,account_id,role) VALUES(?,?,'member')", invite.groupId, me.id);
+    return groupDetails(invite.groupId, me.id);
   }
   if (method === 'GET' && path === '/api/watchlist') {
     return all(`SELECT id,title,kind,year,tmdb_id AS tmdbId,poster_path AS posterPath,overview,status,added_at AS addedAt
