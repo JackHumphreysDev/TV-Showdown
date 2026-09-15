@@ -60,7 +60,7 @@ function groupDetails(groupId, accountId) {
   const watchlists = all(`SELECT w.id, w.account_id AS accountId, p.id AS profileId, w.title, w.kind, w.year,
     w.tmdb_id AS tmdbId, w.poster_path AS posterPath, w.overview, w.status
     FROM watchlist w JOIN profiles p ON p.account_id=w.account_id JOIN memberships m ON m.account_id=w.account_id
-    WHERE m.group_id=? AND (w.status='want' OR (w.kind='series' AND w.status='watching'))
+    WHERE m.group_id=? AND p.active=1 AND (w.status='want' OR (w.kind='series' AND w.status='watching'))
     ORDER BY w.added_at DESC`, groupId);
   return { ...group, members, watchlists };
 }
@@ -95,6 +95,16 @@ function revokeGroupInvites(groupId) {
 }
 function cancelGroupSpin(groupId) {
   run(`UPDATE spin_sessions SET state='cancelled', version=version+1 WHERE group_id=? AND state='active'`, groupId);
+}
+function cancelSpinsForProfile(accountId, profileId) {
+  const sessions = all(`SELECT ss.id, ss.selected_profiles AS selectedProfiles FROM spin_sessions ss
+    JOIN memberships m ON m.group_id=ss.group_id
+    WHERE m.account_id=? AND ss.state='active'`, accountId);
+  for (const session of sessions) {
+    if (JSON.parse(session.selectedProfiles).includes(profileId)) {
+      run("UPDATE spin_sessions SET state='cancelled', version=version+1 WHERE id=? AND state='active'", session.id);
+    }
+  }
 }
 function limitInviteAttempts(request) {
   const address = request.socket.remoteAddress || 'unknown';
@@ -185,14 +195,22 @@ async function route(request) {
   if (method === 'GET' && path === '/api/me') return me;
   if (method === 'PATCH' && path === '/api/me') {
     const data = await body(request);
-    const name = data.name === undefined ? me.name : requiredText(data.name, 'Profile name', 60);
+    const hasName = Object.hasOwn(data, 'name');
+    const hasActive = Object.hasOwn(data, 'active');
+    if (!hasName && !hasActive && !Object.hasOwn(data, 'colour')) fail(400, 'Choose a profile setting to update');
+    if (hasActive && typeof data.active !== 'boolean') fail(400, 'Profile availability must be on or off');
+    const name = hasName ? requiredText(data.name, 'Profile name', 60) : me.name;
+    const active = hasActive ? Number(data.active) : me.active;
     const storedColour = String(me.colour || '').toUpperCase();
     const colour = data.colour === undefined
       ? (profileColours.has(storedColour) ? storedColour : '#F4C567')
       : String(data.colour).toUpperCase();
     if (!profileColours.has(colour)) fail(400, 'Choose a valid profile colour');
-    run('UPDATE profiles SET name=?, colour=? WHERE account_id=?', name, colour, me.id);
-    return { ...me, name, colour };
+    transaction(() => {
+      run('UPDATE profiles SET name=?,active=?,colour=? WHERE account_id=?', name, active, colour, me.id);
+      if (me.active && !active) cancelSpinsForProfile(me.id, me.profile_id);
+    });
+    return { ...me, name, active, colour };
   }
   if (method === 'POST' && path === '/api/auth/logout') {
     run('DELETE FROM sessions WHERE token_hash=?', hash(request.headers.authorization.replace(/^Bearer /i, '')));
