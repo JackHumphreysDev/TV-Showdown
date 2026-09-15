@@ -12,7 +12,18 @@ export type Spin = { id: string; state: string; version: number; winnerProfileId
 export type SearchResult = { tmdbId: number; title: string; kind: Kind; year?: number | null; posterPath?: string | null; overview?: string };
 export type Offer = { provider: string; accessType: string };
 export type Availability = { configured: boolean; offers: Offer[]; link?: string | null; checkedAt?: string; source?: string };
-export type HistoryRow = { id: string; state: string; createdAt: string; winnerName: string; title: string; kind: Kind; year?: number; resultState: string };
+export type HistoryRow = {
+  id: string;
+  sessionId: string;
+  sessionState: 'active' | 'accepted' | 'superseded' | 'cancelled';
+  roundStartedAt: string;
+  createdAt: string;
+  winnerName: string;
+  title: string;
+  kind: Kind;
+  year?: number | null;
+  resultState: 'pending' | 'skipped' | 'accepted';
+};
 
 export const API_BASE = process.env.EXPO_PUBLIC_API_URL || 'http://localhost:4000';
 
