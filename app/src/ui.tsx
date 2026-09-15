@@ -4,7 +4,16 @@ import Svg, { Circle, Path, Text as SvgText } from 'react-native-svg';
 import { Kind, Member } from './api';
 
 export const gold = '#F4C567';
-const colours = ['#F4C567', '#D390A7', '#9EB8C1', '#A997CE', '#D98B74', '#93B9A6', '#D5B380', '#8C9FBE'];
+export const profileColours = [
+  { value: '#F4C567', label: 'Gold' },
+  { value: '#D390A7', label: 'Rose' },
+  { value: '#9EB8C1', label: 'Sky' },
+  { value: '#A997CE', label: 'Lavender' },
+  { value: '#D98B74', label: 'Coral' },
+  { value: '#93B9A6', label: 'Sage' },
+  { value: '#D5B380', label: 'Sand' },
+  { value: '#8C9FBE', label: 'Slate blue' },
+] as const;
 export const kindLabel = (kind: Kind) => kind === 'movie' ? 'Film' : 'Series';
 export const posterUrl = (path?: string | null) => path ? `https://image.tmdb.org/t/p/w342${path}` : null;
 
@@ -25,6 +34,20 @@ export function Poster({ title, path, size = 72 }: { title: string; path?: strin
     : <View style={[s.poster, { width: size, height: size * 1.43 }]}><Text style={s.posterStar}>✦</Text><Text style={s.posterTitle} numberOfLines={3}>{title}</Text></View>;
 }
 
+export function TitleReveal({ title, kind, posterPath, profileName }: { title: string; kind: Kind; posterPath?: string | null; profileName: string }) {
+  const progress = useRef(new Animated.Value(0)).current;
+  useEffect(() => {
+    progress.setValue(0);
+    Animated.timing(progress, { toValue: 1, duration: 900, easing: Easing.out(Easing.cubic), useNativeDriver: Platform.OS !== 'web' }).start();
+  }, [title]);
+  return <View accessibilityLiveRegion="polite" style={s.revealFrame}>
+    <Animated.View style={[s.revealCard, { opacity: progress, transform: [{ translateY: progress.interpolate({ inputRange: [0, 1], outputRange: [28, 0] }) }, { scale: progress.interpolate({ inputRange: [0, 1], outputRange: [.92, 1] }) }] }]}>
+      <Poster title={title} path={posterPath} size={92} />
+      <View style={s.revealCopy}><Text style={s.revealProfile}>{profileName}’s pick</Text><Text style={s.revealTitle}>{title}</Text><Text style={s.revealKind}>{kindLabel(kind)}</Text></View>
+    </Animated.View>
+  </View>;
+}
+
 export function Wheel({ members, winnerId, spinning }: { members: Member[]; winnerId?: string; spinning?: boolean }) {
   const rotation = useRef(new Animated.Value(0)).current;
   const ids = members.map((m) => m.profileId).join(',');
@@ -43,7 +66,7 @@ export function Wheel({ members, winnerId, spinning }: { members: Member[]; winn
       {members.map((m, i) => {
         const a = point(-90 + i * slice, radius), b = point(-90 + (i + 1) * slice, radius), label = point(-90 + (i + 0.5) * slice, radius * 0.66);
         const d = n === 1 ? `M ${centre} ${centre - radius} A ${radius} ${radius} 0 1 1 ${centre - .01} ${centre - radius} Z` : `M ${centre} ${centre} L ${a.x} ${a.y} A ${radius} ${radius} 0 ${slice > 180 ? 1 : 0} 1 ${b.x} ${b.y} Z`;
-        return <React.Fragment key={m.profileId}><Path d={d} fill={colours[i % colours.length]} stroke="#151518" strokeWidth={4} /><SvgText x={label.x} y={label.y} textAnchor="middle" alignmentBaseline="middle" fill="#181719" fontWeight="700" fontSize={n > 7 ? 10 : 14}>{m.name.slice(0, n > 7 ? 7 : 10)}</SvgText></React.Fragment>;
+        return <React.Fragment key={m.profileId}><Path d={d} fill={m.colour || profileColours[i % profileColours.length].value} stroke="#151518" strokeWidth={4} /><SvgText x={label.x} y={label.y} textAnchor="middle" alignmentBaseline="middle" fill="#181719" fontWeight="700" fontSize={n > 7 ? 10 : 14}>{m.name.slice(0, n > 7 ? 7 : 10)}</SvgText></React.Fragment>;
       })}
       <Circle cx={centre} cy={centre} r={24} fill="#161619" /><Circle cx={centre} cy={centre} r={9} fill={gold} />
     </Svg></Animated.View>
@@ -56,5 +79,6 @@ const s = StyleSheet.create({
   label: { color: '#E0DBDB', fontSize: 14, fontWeight: '700' }, input: { color: '#FCF9F3', backgroundColor: '#28262A', borderWidth: 1, borderColor: '#5A535D', borderRadius: 11, paddingHorizontal: 13, minHeight: 46, fontSize: 16 },
   chip: { borderWidth: 1, borderColor: '#55515B', borderRadius: 24, backgroundColor: '#28262B', paddingHorizontal: 13, paddingVertical: 9 }, chipActive: { backgroundColor: '#58472D', borderColor: gold }, chipText: { color: '#C6C0C5', fontSize: 13, fontWeight: '700' }, chipTextActive: { color: '#FFE5B0' },
   poster: { backgroundColor: '#493540', borderRadius: 8, alignItems: 'center', justifyContent: 'space-around', padding: 5 }, posterStar: { color: gold, fontSize: 21 }, posterTitle: { color: '#FFF8EC', fontSize: 11, fontWeight: '700', textAlign: 'center' },
+  revealFrame: { width: '100%', alignItems: 'center', paddingVertical: 8 }, revealCard: { width: '100%', maxWidth: 440, flexDirection: 'row', alignItems: 'center', gap: 18, backgroundColor: '#342930', borderColor: '#76594B', borderWidth: 1, borderRadius: 20, padding: 18 }, revealCopy: { flex: 1, gap: 7 }, revealProfile: { color: gold, fontSize: 13, fontWeight: '800', textTransform: 'uppercase', letterSpacing: 1 }, revealTitle: { color: '#FFF9F2', fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', fontSize: 29, lineHeight: 34, fontWeight: '700' }, revealKind: { color: '#BBB3BA', fontSize: 14, fontWeight: '700' },
   wheelWrap: { alignSelf: 'center', paddingTop: 13 }, pointer: { position: 'absolute', zIndex: 3, top: 0, left: '50%', marginLeft: -11, width: 0, height: 0, borderLeftWidth: 11, borderRightWidth: 11, borderTopWidth: 20, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: gold },
 });
