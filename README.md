@@ -4,6 +4,8 @@ TV Showdown is a shared film-night decision app for web, iOS and Android. Each p
 
 The app uses UK English and shows viewing options for the United Kingdom. `Want to watch` films and series, and `Watching` series, are eligible for the wheel.
 
+A spin now has two clear stages: the profile wheel resolves first, followed by an animated title reveal from that person’s eligible watchlist. People who enable reduced motion see the saved result immediately, and either animation stage can be skipped.
+
 ## What is in this repository
 
 - `app/` — one Expo/React Native interface for web, iOS and Android.

@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, Share, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { AccessibilityInfo, ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, Share, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
 import { api, Availability, getToken, Group, HistoryRow, Item, Kind, Me, SearchResult, setStoredToken, Spin, Status } from './src/api';
-import { Button, Chip, Field, gold, kindLabel, Poster, Wheel } from './src/ui';
+import { Button, Chip, Field, gold, kindLabel, Poster, TitleReveal, Wheel } from './src/ui';
 
 type Page = 'spin' | 'watchlist' | 'groups' | 'history' | 'profile';
+type RevealStage = 'profile' | 'title' | null;
 const nav: { page: Page; label: string; icon: string }[] = [
   { page: 'spin', label: 'Spin', icon: '◉' }, { page: 'watchlist', label: 'Watchlist', icon: '▤' },
   { page: 'groups', label: 'Groups', icon: '◎' }, { page: 'history', label: 'History', icon: '◷' }, { page: 'profile', label: 'Profile', icon: '◌' },
@@ -19,7 +20,7 @@ export default function App() {
   const [groups, setGroups] = useState<Group[]>([]), [groupId, setGroupId] = useState<string | null>(null), [group, setGroup] = useState<Group | null>(null);
   const [watchlist, setWatchlist] = useState<Item[]>([]), [spin, setSpin] = useState<Spin | null>(null), [history, setHistory] = useState<HistoryRow[]>([]);
   const [page, setPage] = useState<Page>('spin'), [selected, setSelected] = useState<string[]>([]), [filter, setFilter] = useState<'both' | Kind>('both');
-  const [animating, setAnimating] = useState(false), [showOptions, setShowOptions] = useState(false), [options, setOptions] = useState<Availability | null>(null);
+  const [revealStage, setRevealStage] = useState<RevealStage>(null), [reduceMotion, setReduceMotion] = useState(false), [showOptions, setShowOptions] = useState(false), [options, setOptions] = useState<Availability | null>(null);
   const [authMode, setAuthMode] = useState<'register' | 'login'>('register'), [email, setEmail] = useState(''), [password, setPassword] = useState(''), [name, setName] = useState('');
   const [groupName, setGroupName] = useState(''), [roomCode, setRoomCode] = useState(''), [preview, setPreview] = useState<{ name: string; memberCount: number } | null>(null);
   const [invite, setInvite] = useState<{ code: string; link: string; expiresInDays: number } | null>(null);
@@ -56,7 +57,31 @@ export default function App() {
     const timer = setInterval(() => refreshGroup(token, groupId).catch(() => {}), 10000);
     return () => clearInterval(timer);
   }, [token, groupId, refreshGroup]);
+  useEffect(() => {
+    let active = true;
+    AccessibilityInfo.isReduceMotionEnabled().then((enabled) => { if (active) setReduceMotion(enabled); });
+    const subscription = AccessibilityInfo.addEventListener('reduceMotionChanged', setReduceMotion);
+    return () => { active = false; subscription.remove(); };
+  }, []);
+  useEffect(() => {
+    if (reduceMotion && revealStage) {
+      setRevealStage(null);
+      if (spin) AccessibilityInfo.announceForAccessibility(`${spin.result.profile_name} picked ${spin.result.title}`);
+    }
+  }, [reduceMotion, revealStage, spin]);
+  useEffect(() => {
+    if (!revealStage) return;
+    const timer = setTimeout(() => {
+      if (revealStage === 'profile') setRevealStage('title');
+      else {
+        setRevealStage(null);
+        if (spin) AccessibilityInfo.announceForAccessibility(`${spin.result.profile_name} picked ${spin.result.title}`);
+      }
+    }, revealStage === 'profile' ? 2800 : 1800);
+    return () => clearTimeout(timer);
+  }, [revealStage, spin]);
   const members = group?.members || [], groupItems = group?.watchlists || [];
+  const animating = revealStage !== null;
   const chosenMembers = useMemo(() => members.filter((m) => selected.includes(m.profileId)), [members, selected]);
   const canSpin = chosenMembers.length > 0 && chosenMembers.every((m) => groupItems.some((i) => i.profileId === m.profileId && (filter === 'both' || i.kind === filter)));
   const eligibleOwn = watchlist.filter((i) => i.status === 'want' || (i.kind === 'series' && i.status === 'watching')).length;
@@ -67,7 +92,7 @@ export default function App() {
   });
   const signOut = () => perform(async () => {
     if (token) await api('/api/auth/logout', token, 'POST');
-    await setStoredToken(null); setToken(null); setMe(null); setGroups([]); setGroup(null); setPage('spin');
+    await setStoredToken(null); setToken(null); setMe(null); setGroups([]); setGroup(null); setRevealStage(null); setPage('spin');
   });
   const createGroup = () => perform(async () => {
     const created = await api<Group>('/api/groups', token, 'POST', { name: groupName });
@@ -115,7 +140,8 @@ export default function App() {
   const startSpin = () => perform(async () => {
     if (!groupId || !canSpin) return;
     const next = await api<Spin>(`/api/groups/${groupId}/spin`, token, 'POST', { selectedProfileIds: selected, filter, idempotencyKey: `${Date.now()}-${Math.random()}` });
-    setSpin(next); setShowOptions(false); setOptions(null); setAnimating(true); setTimeout(() => setAnimating(false), 2900);
+    setSpin(next); setShowOptions(false); setOptions(null); setRevealStage(reduceMotion ? null : 'profile');
+    if (reduceMotion) AccessibilityInfo.announceForAccessibility(`${next.result.profile_name} picked ${next.result.title}`);
   });
   const spinAction = (action: 'skip' | 'accept') => perform(async () => {
     if (!spin || !groupId) return;
@@ -164,7 +190,9 @@ export default function App() {
             {!canSpin && <Text style={s.hint}>Everyone selected needs an eligible title for this filter.</Text>}
             <Text style={s.small}>Every selected person has equal odds, however long their watchlist is.</Text><Button label={spin?.state === 'active' ? 'Spin again' : 'Spin the wheel'} onPress={startSpin} disabled={!canSpin || busy || animating} />
           </View>
-          {animating ? <View style={s.wheelCard}><Text style={s.eyebrow}>CHOOSING A PROFILE</Text><Wheel members={chosenMembers} winnerId={spin?.winnerProfileId} spinning /><Text style={s.white}>Let’s see whose list wins…</Text><Button label="Skip animation" quiet onPress={() => setAnimating(false)} /></View> : <View style={s.wheelCard}><Wheel members={chosenMembers.length ? chosenMembers : members} /><Text style={s.small}>Your film night, decided fairly.</Text></View>}
+          {revealStage === 'profile' ? <View style={s.wheelCard}><Text style={s.eyebrow}>CHOOSING A PROFILE</Text><Wheel members={chosenMembers} winnerId={spin?.winnerProfileId} spinning /><Text style={s.white}>Let’s see whose list wins…</Text><Button label="Skip animation" quiet onPress={() => { setRevealStage(null); if (spin) AccessibilityInfo.announceForAccessibility(`${spin.result.profile_name} picked ${spin.result.title}`); }} /></View>
+            : revealStage === 'title' && spin ? <View style={s.wheelCard}><Text style={s.eyebrow}>CHOOSING A TITLE</Text><TitleReveal title={spin.result.title} kind={spin.result.kind} posterPath={spin.result.posterPath} profileName={spin.result.profile_name} /><Text style={s.small}>One title, selected fairly from the winning watchlist.</Text><Button label="Show result now" quiet onPress={() => { setRevealStage(null); AccessibilityInfo.announceForAccessibility(`${spin.result.profile_name} picked ${spin.result.title}`); }} /></View>
+            : <View style={s.wheelCard}><Wheel members={chosenMembers.length ? chosenMembers : members} /><Text style={s.small}>Your film night, decided fairly.</Text></View>}
         </>}
       </>}
 
