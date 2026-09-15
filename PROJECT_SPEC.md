@@ -118,6 +118,8 @@
 ### Search and metadata
 
 - Search results show title, year, type, and poster where available so remakes and similarly named titles are distinguishable.
+- The server exposes a paginated catalogue endpoint for movie and series search or popular browsing, with `page`, `totalPages`, and `totalResults` metadata. Clients load pages on demand; they do not attempt to copy the entire external catalogue into a device or local database.
+- A title-details endpoint can load richer runtime, genres, backdrop, and rating metadata after a user selects a result.
 - A provider's title identifier is stored separately from a person's watchlist item. A catalogue title can be refreshed without overwriting user status or notes.
 - If metadata cannot be loaded, the item's typed title remains usable for spinning. Posters and backdrops use accessible placeholders.
 - Metadata, artwork, attribution, and caching must comply with the chosen provider's license and terms before launch.

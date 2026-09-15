@@ -24,7 +24,13 @@ Run `npm run check` from the repository root to type-check the app and run core 
 
 ## Catalogue and availability
 
-TMDB supplies title search and poster metadata. UK viewing options are provided by JustWatch through TMDB. The TMDB watch-provider endpoint identifies services and access types but does not provide direct links to individual provider titles; **View options on TMDB** opens TMDB's listing for the title. Availability can change. Without a TMDB token, manual watchlist entry and the wheel still work, while search and viewing options show an honest unavailable state.
+TMDB supplies title search and poster metadata. The signed-in catalogue API exposes:
+
+- `GET /api/catalogue?q=...&kind=both|movie|series&page=1` for paginated search or, without `q`, popular catalogue browsing. Each page contains the normalised title, year, type, poster and synopsis, plus `totalPages` and `totalResults` so a client can keep loading until the catalogue window is exhausted.
+- `GET /api/catalogue/{movie|series}/{tmdbId}` for richer title details such as runtime, genres, backdrop and ratings.
+- `GET /api/search?q=...` remains as a compact search response for the watchlist add flow.
+
+The API deliberately pages results rather than attempting to download every film and series into the app. TMDB's catalogue is continuously changing and its API has a finite page window; keep the token on the server and request only the pages needed by the current screen. UK viewing options are provided by JustWatch through TMDB. The TMDB watch-provider endpoint identifies services and access types but does not provide direct links to individual provider titles; **View options on TMDB** opens TMDB's listing for the title. Availability can change. Without a TMDB token, manual watchlist entry and the wheel still work, while catalogue and viewing options return an honest unavailable state.
 
 This product uses the TMDB API but is not endorsed or certified by TMDB. A production release must include TMDB's approved logo and comply with TMDB and JustWatch attribution and licensing rules. Do not assume the developer API covers commercial use.
 

@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, Share, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { api, Availability, getToken, Group, HistoryRow, Item, Kind, Me, SearchResult, setStoredToken, Spin, Status } from './src/api';
+import { api, Availability, CatalogueResponse, getToken, Group, HistoryRow, Item, Kind, Me, SearchResult, setStoredToken, Spin, Status } from './src/api';
 import { Button, Chip, Field, gold, kindLabel, Poster, Wheel } from './src/ui';
 
 type Page = 'spin' | 'watchlist' | 'groups' | 'history' | 'profile';
@@ -23,7 +23,7 @@ export default function App() {
   const [authMode, setAuthMode] = useState<'register' | 'login'>('register'), [email, setEmail] = useState(''), [password, setPassword] = useState(''), [name, setName] = useState('');
   const [groupName, setGroupName] = useState(''), [roomCode, setRoomCode] = useState(''), [preview, setPreview] = useState<{ name: string; memberCount: number } | null>(null);
   const [invite, setInvite] = useState<{ code: string; link: string; expiresInDays: number } | null>(null);
-  const [query, setQuery] = useState(''), [searchResults, setSearchResults] = useState<SearchResult[]>([]), [catalogueConnected, setCatalogueConnected] = useState(true);
+  const [query, setQuery] = useState(''), [searchResults, setSearchResults] = useState<SearchResult[]>([]), [catalogueConnected, setCatalogueConnected] = useState(true), [cataloguePage, setCataloguePage] = useState(0), [catalogueTotalPages, setCatalogueTotalPages] = useState(0);
   const [manualTitle, setManualTitle] = useState(''), [manualKind, setManualKind] = useState<Kind>('movie'), [profileName, setProfileName] = useState('');
 
   const perform = async (action: () => Promise<void>) => { setError(''); setBusy(true); try { await action(); } catch (e) { setError(e instanceof Error ? e.message : 'Something went wrong'); } finally { setBusy(false); } };
@@ -95,14 +95,25 @@ export default function App() {
   const leaveGroup = () => confirmAction(`Leave ${group?.name}?`, 'You will lose access to its spins and history, but keep your own watchlist.', () => perform(async () => {
     await api(`/api/groups/${groupId}/members/me`, token, 'DELETE'); setGroup(null); setInvite(null); await refreshBase(token!);
   }));
-  const search = () => perform(async () => {
-    if (query.trim().length < 2) throw new Error('Enter at least two letters to search');
-    const result = await api<{ configured: boolean; results: SearchResult[] }>(`/api/search?q=${encodeURIComponent(query.trim())}`, token);
-    setCatalogueConnected(result.configured); setSearchResults(result.results);
+  const loadCatalogue = (pageNumber: number, append = false, requestedQuery = query.trim()) => perform(async () => {
+    const queryParam = requestedQuery ? `&q=${encodeURIComponent(requestedQuery)}` : '';
+    const result = await api<CatalogueResponse>(`/api/catalogue?kind=both&page=${pageNumber}${queryParam}`, token);
+    setCatalogueConnected(result.configured);
+    setSearchResults((old) => {
+      if (!append) return result.results;
+      const seen = new Set(old.map((item) => `${item.kind}-${item.tmdbId}`));
+      return [...old, ...result.results.filter((item) => !seen.has(`${item.kind}-${item.tmdbId}`))];
+    });
+    setCataloguePage(result.page); setCatalogueTotalPages(result.totalPages);
   });
+  const search = () => {
+    if (query.trim().length < 2) { setError('Enter at least two letters to search'); return; }
+    loadCatalogue(1);
+  };
+  const browsePopular = () => { setQuery(''); loadCatalogue(1, false, ''); };
   const addItem = (item: Partial<Item>) => perform(async () => {
     await api('/api/watchlist', token, 'POST', item); setWatchlist(await api('/api/watchlist', token));
-    setManualTitle(''); setQuery(''); setSearchResults([]); if (groupId) await refreshGroup(token!, groupId);
+    setManualTitle(''); setQuery(''); setSearchResults([]); setCataloguePage(0); setCatalogueTotalPages(0); if (groupId) await refreshGroup(token!, groupId);
   });
   const changeStatus = (item: Item, status: Status) => perform(async () => {
     await api(`/api/watchlist/${item.id}`, token, 'PATCH', { status }); setWatchlist(await api('/api/watchlist', token)); if (groupId) await refreshGroup(token!, groupId);
@@ -169,9 +180,10 @@ export default function App() {
       </>}
 
       {page === 'watchlist' && <><Text style={s.eyebrow}>YOUR PICKS</Text><Text style={s.title}>Watchlist</Text><Text style={s.muted}>Only you can edit your list. Eligible titles are visible to your groups.</Text>
-        <View style={s.card}><Text style={s.section}>Add a title</Text><Field label="Search films and series" value={query} onChangeText={setQuery} placeholder="Search by title" /><Button label="Search catalogue" onPress={search} disabled={busy} />
+        <View style={s.card}><Text style={s.section}>Add a title</Text><Field label="Search films and series" value={query} onChangeText={setQuery} placeholder="Search by title" /><View style={s.row}><Button label="Search catalogue" onPress={search} disabled={busy} /><Button label="Browse popular" quiet onPress={browsePopular} disabled={busy} /></View>
           {!catalogueConnected && <Text style={s.hint}>Catalogue search needs a TMDB API token. You can add a title manually.</Text>}
           {searchResults.map((r) => <Pressable key={`${r.kind}-${r.tmdbId}`} onPress={() => addItem(r)} style={s.listRow}><Poster title={r.title} path={r.posterPath} size={44} /><View style={{ flex: 1 }}><Text style={s.white}>{r.title}</Text><Text style={s.small}>{kindLabel(r.kind)}{r.year ? ` · ${r.year}` : ''}</Text></View><Text style={s.goldText}>＋</Text></Pressable>)}
+          {cataloguePage > 0 && cataloguePage < catalogueTotalPages && <Button label="Load more catalogue results" quiet onPress={() => loadCatalogue(cataloguePage + 1, true)} disabled={busy} />}
           <View style={s.rule} /><Text style={s.label}>Or add your own</Text><Field label="Title" value={manualTitle} onChangeText={setManualTitle} placeholder="Film or series title" /><View style={s.row}><Chip label="Film" active={manualKind === 'movie'} onPress={() => setManualKind('movie')} /><Chip label="Series" active={manualKind === 'series'} onPress={() => setManualKind('series')} /></View><Button label="Add to watchlist" onPress={() => addItem({ title: manualTitle, kind: manualKind })} disabled={!manualTitle.trim() || busy} />
         </View><Text style={s.section}>Your titles <Text style={s.small}>· {watchlist.length} total, {eligibleOwn} eligible</Text></Text>
         {!watchlist.length ? <Text style={s.muted}>Your list starts here. Add a film or series above.</Text> : watchlist.map((item) => <View key={item.id} style={s.itemCard}><Poster title={item.title} path={item.posterPath} size={62} /><View style={{ flex: 1, gap: 6 }}><Text style={s.white}>{item.title}</Text><Text style={s.small}>{kindLabel(item.kind)}{item.year ? ` · ${item.year}` : ''}</Text><View style={s.row}>{(['want', 'watching', 'watched'] as Status[]).map((status) => <Chip key={status} label={statusLabel(status)} active={item.status === status} onPress={() => changeStatus(item, status)} />)}</View><Pressable onPress={() => removeItem(item)}><Text style={s.remove}>Remove</Text></Pressable></View></View>)}
