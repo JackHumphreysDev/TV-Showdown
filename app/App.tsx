@@ -1,15 +1,24 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { AccessibilityInfo, ActivityIndicator, Alert, Linking, Platform, Pressable, ScrollView, Share, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
-import { api, Availability, getToken, Group, HistoryRow, Item, Kind, Me, SearchResult, setStoredToken, Spin, Status } from './src/api';
-import { Button, Chip, Field, gold, kindLabel, Poster, TitleReveal, Wheel } from './src/ui';
+import { AccessibilityInfo, ActivityIndicator, Alert, Linking, Modal, Platform, Pressable, ScrollView, Share, StatusBar, StyleSheet, Text, View, useWindowDimensions } from 'react-native';
+import { api, Availability, CatalogueDetailsResponse, CatalogueResponse, CatalogueTitle, getToken, Group, HistoryRow, Item, Kind, Me, SearchResult, setStoredToken, Spin, Status } from './src/api';
+import { Button, Chip, Field, gold, kindLabel, Poster, profileColours, TitleReveal, Wheel } from './src/ui';
 
 type Page = 'spin' | 'watchlist' | 'groups' | 'history' | 'profile';
+type InvitePreview = { groupId: string; name: string; memberCount: number; alreadyMember: boolean; members: { profileId: string; name: string; colour: string; role: 'owner' | 'member' }[] };
+type DisplayTitle = Pick<Item, 'title' | 'kind' | 'year' | 'tmdbId' | 'posterPath' | 'overview'> & Partial<Pick<CatalogueTitle, 'runtime' | 'genres' | 'backdropPath' | 'voteAverage' | 'voteCount' | 'status'>>;
 type RevealStage = 'profile' | 'title' | null;
 const nav: { page: Page; label: string; icon: string }[] = [
   { page: 'spin', label: 'Spin', icon: '◉' }, { page: 'watchlist', label: 'Watchlist', icon: '▤' },
   { page: 'groups', label: 'Groups', icon: '◎' }, { page: 'history', label: 'History', icon: '◷' }, { page: 'profile', label: 'Profile', icon: '◌' },
 ];
 const statusLabel = (value: Status) => ({ want: 'Want to watch', watching: 'Watching', watched: 'Watched' })[value];
+const historyOutcome = (row: HistoryRow) => {
+  if (row.resultState === 'accepted') return 'Chosen';
+  if (row.resultState === 'skipped') return 'Skipped';
+  if (row.sessionState === 'superseded') return 'Re-spun';
+  if (row.sessionState === 'cancelled') return 'Cancelled';
+  return 'Current';
+};
 const joinCode = (url: string | null) => { try { const u = new URL(url || ''); return u.searchParams.get('join') || u.searchParams.get('code') || ''; } catch { return ''; } };
 
 export default function App() {
@@ -17,20 +26,23 @@ export default function App() {
   const desktop = width >= 800;
   const [booting, setBooting] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [token, setToken] = useState<string | null>(null), [me, setMe] = useState<Me | null>(null);
-  const [groups, setGroups] = useState<Group[]>([]), [groupId, setGroupId] = useState<string | null>(null), [group, setGroup] = useState<Group | null>(null);
+  const [groups, setGroups] = useState<Group[]>([]), [groupId, setGroupId] = useState<string | null>(null), [groupDetail, setGroup] = useState<Group | null>(null);
   const [watchlist, setWatchlist] = useState<Item[]>([]), [spin, setSpin] = useState<Spin | null>(null), [history, setHistory] = useState<HistoryRow[]>([]);
   const [page, setPage] = useState<Page>('spin'), [selected, setSelected] = useState<string[]>([]), [filter, setFilter] = useState<'both' | Kind>('both');
   const [revealStage, setRevealStage] = useState<RevealStage>(null), [reduceMotion, setReduceMotion] = useState(false), [showOptions, setShowOptions] = useState(false), [options, setOptions] = useState<Availability | null>(null);
   const [authMode, setAuthMode] = useState<'register' | 'login'>('register'), [email, setEmail] = useState(''), [password, setPassword] = useState(''), [name, setName] = useState('');
-  const [groupName, setGroupName] = useState(''), [roomCode, setRoomCode] = useState(''), [preview, setPreview] = useState<{ name: string; memberCount: number } | null>(null);
+  const [groupName, setGroupName] = useState(''), [roomCode, setRoomCode] = useState(''), [preview, setPreview] = useState<InvitePreview | null>(null);
+  const [groupEditName, setGroupEditName] = useState('');
   const [invite, setInvite] = useState<{ code: string; link: string; expiresInDays: number } | null>(null);
-  const [query, setQuery] = useState(''), [searchResults, setSearchResults] = useState<SearchResult[]>([]), [catalogueConnected, setCatalogueConnected] = useState(true);
-  const [manualTitle, setManualTitle] = useState(''), [manualKind, setManualKind] = useState<Kind>('movie'), [profileName, setProfileName] = useState('');
+  const [viewedProfileId, setViewedProfileId] = useState<string | null>(null);
+  const [query, setQuery] = useState(''), [searchResults, setSearchResults] = useState<SearchResult[]>([]), [catalogueConnected, setCatalogueConnected] = useState(true), [cataloguePage, setCataloguePage] = useState(0), [catalogueTotalPages, setCatalogueTotalPages] = useState(0);
+  const [manualTitle, setManualTitle] = useState(''), [manualKind, setManualKind] = useState<Kind>('movie'), [profileName, setProfileName] = useState(''), [profileColour, setProfileColour] = useState(gold);
+  const [showDetails, setShowDetails] = useState(false), [detailTitle, setDetailTitle] = useState<DisplayTitle | null>(null), [detailsLoading, setDetailsLoading] = useState(false), [detailsConnected, setDetailsConnected] = useState(true);
 
   const perform = async (action: () => Promise<void>) => { setError(''); setBusy(true); try { await action(); } catch (e) { setError(e instanceof Error ? e.message : 'Something went wrong'); } finally { setBusy(false); } };
   const refreshBase = useCallback(async (t: string) => {
     const [person, memberships, titles] = await Promise.all([api<Me>('/api/me', t), api<Group[]>('/api/groups', t), api<Item[]>('/api/watchlist', t)]);
-    setMe(person); setProfileName(person.name); setGroups(memberships); setWatchlist(titles);
+    setMe(person); setProfileName(person.name); setProfileColour(profileColours.some((choice) => choice.value === person.colour?.toUpperCase()) ? person.colour.toUpperCase() : gold); setGroups(memberships); setWatchlist(titles);
     setGroupId((old) => old && memberships.some((g) => g.id === old) ? old : memberships[0]?.id || null);
   }, []);
   const refreshGroup = useCallback(async (t: string, id: string) => {
@@ -44,7 +56,15 @@ export default function App() {
   }, []);
   useEffect(() => {
     getToken().then(async (stored) => {
-      if (stored) { try { await refreshBase(stored); setToken(stored); } catch { await setStoredToken(null); } }
+      if (stored) {
+        try { await refreshBase(stored); setToken(stored); }
+        catch (cause) {
+          if (cause instanceof TypeError) {
+            setToken(stored);
+            setError('You’re offline. Reconnect to load your groups and watchlists. Your sign-in is saved.');
+          } else await setStoredToken(null);
+        }
+      }
       setBooting(false);
     });
     Linking.getInitialURL().then((url) => { const code = joinCode(url); if (code) { setRoomCode(code); setPage('groups'); } });
@@ -57,6 +77,12 @@ export default function App() {
     const timer = setInterval(() => refreshGroup(token, groupId).catch(() => {}), 10000);
     return () => clearInterval(timer);
   }, [token, groupId, refreshGroup]);
+  const group = groupDetail?.id === groupId ? groupDetail : null;
+  useEffect(() => { setGroupEditName(group?.name || ''); }, [group?.id, group?.name]);
+  const members = group?.members || [], groupItems = group?.watchlists || [];
+  const sharedMembers = members.filter((member) => member.active && member.accountId !== me?.id);
+  const viewedMember = sharedMembers.find((member) => member.profileId === viewedProfileId) || sharedMembers[0];
+  const sharedItems = groupItems.filter((item) => item.profileId === viewedMember?.profileId);
   useEffect(() => {
     let active = true;
     AccessibilityInfo.isReduceMotionEnabled().then((enabled) => { if (active) setReduceMotion(enabled); });
@@ -80,11 +106,13 @@ export default function App() {
     }, revealStage === 'profile' ? 2800 : 1800);
     return () => clearTimeout(timer);
   }, [revealStage, spin]);
-  const members = group?.members || [], groupItems = group?.watchlists || [];
   const animating = revealStage !== null;
   const chosenMembers = useMemo(() => members.filter((m) => selected.includes(m.profileId)), [members, selected]);
-  const canSpin = chosenMembers.length > 0 && chosenMembers.every((m) => groupItems.some((i) => i.profileId === m.profileId && (filter === 'both' || i.kind === filter)));
+  const canSpin = chosenMembers.length > 0 && chosenMembers.every((m) => m.active && groupItems.some((i) => i.profileId === m.profileId && (filter === 'both' || i.kind === filter)));
   const eligibleOwn = watchlist.filter((i) => i.status === 'want' || (i.kind === 'series' && i.status === 'watching')).length;
+  const resultItemId = spin?.result.watchlistItemId;
+  const isWinningOwner = spin?.winnerProfileId === me?.profile_id;
+  const winningOwnItem = isWinningOwner && resultItemId ? watchlist.find((item) => item.id === resultItemId) : undefined;
 
   const authenticate = () => perform(async () => {
     const result = await api<{ token: string }>(`/api/auth/${authMode}`, null, 'POST', { email, password, name });
@@ -92,13 +120,21 @@ export default function App() {
   });
   const signOut = () => perform(async () => {
     if (token) await api('/api/auth/logout', token, 'POST');
-    await setStoredToken(null); setToken(null); setMe(null); setGroups([]); setGroup(null); setRevealStage(null); setPage('spin');
+    await setStoredToken(null);
+    setToken(null); setMe(null); setGroups([]); setGroupId(null); setGroup(null);
+    setWatchlist([]); setSpin(null); setHistory([]); setSelected([]); setViewedProfileId(null);
+    setInvite(null); setSearchResults([]); setOptions(null); setShowOptions(false); setPage('spin');
+    setShowDetails(false);
+    setPreview(null);
+    setRevealStage(null);
   });
   const createGroup = () => perform(async () => {
     const created = await api<Group>('/api/groups', token, 'POST', { name: groupName });
     await refreshBase(token!); setGroupId(created.id); setGroup(created); setGroupName(''); setPage('spin');
   });
-  const checkCode = () => perform(async () => setPreview(await api(`/api/invites/${roomCode.trim().toUpperCase()}`, null)));
+  const checkCode = () => perform(async () => {
+    setPreview(null); setPreview(await api<InvitePreview>(`/api/invites/${roomCode.trim().toUpperCase()}`, token));
+  });
   const joinGroup = () => perform(async () => {
     const joined = await api<Group>('/api/groups/join', token, 'POST', { code: roomCode });
     await refreshBase(token!); setGroupId(joined.id); setPreview(null); setRoomCode(''); setPage('spin');
@@ -107,6 +143,13 @@ export default function App() {
   const confirmAction = (title: string, message: string, action: () => void) => {
     if (Platform.OS === 'web') { if (window.confirm(`${title}\n\n${message}`)) action(); }
     else Alert.alert(title, message, [{ text: 'Cancel' }, { text: 'Continue', style: 'destructive', onPress: action }]);
+  };
+  const setProfileActive = (active: boolean) => perform(async () => {
+    await api('/api/me', token, 'PATCH', { active }); await refreshBase(token!); if (groupId) await refreshGroup(token!, groupId);
+  });
+  const toggleProfile = () => {
+    if (me?.active) confirmAction('Pause your profile?', 'You will be left out of group wheels until you reactivate it. Your account, groups and watchlist will be kept.', () => setProfileActive(false));
+    else setProfileActive(true);
   };
   const revokeInvites = () => confirmAction('Revoke group invites?', 'Existing links and room codes will stop working.', () => perform(async () => {
     await api(`/api/groups/${groupId}/invites`, token, 'DELETE'); setInvite(null);
@@ -120,14 +163,34 @@ export default function App() {
   const leaveGroup = () => confirmAction(`Leave ${group?.name}?`, 'You will lose access to its spins and history, but keep your own watchlist.', () => perform(async () => {
     await api(`/api/groups/${groupId}/members/me`, token, 'DELETE'); setGroup(null); setInvite(null); await refreshBase(token!);
   }));
-  const search = () => perform(async () => {
-    if (query.trim().length < 2) throw new Error('Enter at least two letters to search');
-    const result = await api<{ configured: boolean; results: SearchResult[] }>(`/api/search?q=${encodeURIComponent(query.trim())}`, token);
-    setCatalogueConnected(result.configured); setSearchResults(result.results);
+  const renameGroup = () => perform(async () => {
+    if (!groupId || group?.role !== 'owner') return;
+    const updated = await api<Group>(`/api/groups/${groupId}`, token, 'PATCH', { name: groupEditName });
+    setGroup(updated); await refreshBase(token!);
   });
+  const deleteGroup = () => confirmAction(`Delete ${group?.name}?`, 'This permanently removes the group, its invites and its spin history. Members keep their personal watchlists.', () => perform(async () => {
+    if (!groupId || group?.role !== 'owner') return;
+    await api(`/api/groups/${groupId}`, token, 'DELETE'); setGroup(null); setInvite(null); setSpin(null); setHistory([]); setSelected([]); await refreshBase(token!);
+  }));
+  const loadCatalogue = (pageNumber: number, append = false, requestedQuery = query.trim()) => perform(async () => {
+    const queryParam = requestedQuery ? `&q=${encodeURIComponent(requestedQuery)}` : '';
+    const result = await api<CatalogueResponse>(`/api/catalogue?kind=both&page=${pageNumber}${queryParam}`, token);
+    setCatalogueConnected(result.configured);
+    setSearchResults((old) => {
+      if (!append) return result.results;
+      const seen = new Set(old.map((item) => `${item.kind}-${item.tmdbId}`));
+      return [...old, ...result.results.filter((item) => !seen.has(`${item.kind}-${item.tmdbId}`))];
+    });
+    setCataloguePage(result.page); setCatalogueTotalPages(result.totalPages);
+  });
+  const search = () => {
+    if (query.trim().length < 2) { setError('Enter at least two letters to search'); return; }
+    loadCatalogue(1);
+  };
+  const browsePopular = () => { setQuery(''); loadCatalogue(1, false, ''); };
   const addItem = (item: Partial<Item>) => perform(async () => {
     await api('/api/watchlist', token, 'POST', item); setWatchlist(await api('/api/watchlist', token));
-    setManualTitle(''); setQuery(''); setSearchResults([]); if (groupId) await refreshGroup(token!, groupId);
+    setManualTitle(''); setQuery(''); setSearchResults([]); setCataloguePage(0); setCatalogueTotalPages(0); if (groupId) await refreshGroup(token!, groupId);
   });
   const changeStatus = (item: Item, status: Status) => perform(async () => {
     await api(`/api/watchlist/${item.id}`, token, 'PATCH', { status }); setWatchlist(await api('/api/watchlist', token)); if (groupId) await refreshGroup(token!, groupId);
@@ -152,6 +215,29 @@ export default function App() {
     setShowOptions(true); if (!spin?.result.tmdbId) { setOptions({ configured: true, offers: [] }); return; }
     setOptions(await api<Availability>(`/api/availability?kind=${spin.result.kind}&tmdbId=${spin.result.tmdbId}`, token));
   });
+  const saveProfile = () => perform(async () => {
+    await api('/api/me', token, 'PATCH', { name: profileName, colour: profileColour });
+    await refreshBase(token!);
+    if (groupId) await refreshGroup(token!, groupId);
+  });
+  const markResultWatched = () => perform(async () => {
+    if (!spin || !groupId || !winningOwnItem) return;
+    await api(`/api/watchlist/${winningOwnItem.id}`, token, 'PATCH', { status: 'watched' });
+    await refreshBase(token!);
+    await refreshGroup(token!, groupId);
+  });
+  const openTitleDetails = async (item: DisplayTitle) => {
+    setShowDetails(true); setDetailTitle(item); setDetailsConnected(true); setDetailsLoading(Boolean(item.tmdbId)); setError('');
+    if (!item.tmdbId) return;
+    try {
+      const result = await api<CatalogueDetailsResponse>(`/api/catalogue/${item.kind}/${item.tmdbId}`, token);
+      setDetailsConnected(result.configured);
+      if (result.title) setDetailTitle(result.title);
+    } catch (e) {
+      setDetailsConnected(false);
+      setError(e instanceof Error ? e.message : 'Title details could not be loaded');
+    } finally { setDetailsLoading(false); }
+  };
 
   if (booting) return <View style={s.boot}><ActivityIndicator color={gold} /><Text style={s.brand}>TV SHOWDOWN</Text></View>;
   if (!token) return <View style={s.root}><StatusBar barStyle="light-content" /><ScrollView contentContainerStyle={s.authContent}>
@@ -172,20 +258,21 @@ export default function App() {
       <Text style={s.sideFooter}>UNITED KINGDOM · ENGLISH (UK)</Text></View>}
     <View style={s.main}><ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={[s.content, !desktop && s.contentMobile]}>
       {!desktop && <Text style={s.brand}>TV <Text style={{ color: gold }}>SHOWDOWN</Text></Text>}
-      {error && <Pressable onPress={() => setError('')} style={s.errorBox}><Text style={s.error}>{error}  ·  Dismiss</Text></Pressable>}
+      {error && <View style={s.errorBox}><Text style={s.error}>{error}</Text>{!me && <Button label="Retry connection" quiet onPress={() => perform(async () => { await refreshBase(token!); })} disabled={busy} />}<Pressable onPress={() => setError('')}><Text style={s.small}>Dismiss</Text></Pressable></View>}
 
       {page === 'spin' && <><Text style={s.eyebrow}>TONIGHT’S DECISION</Text><Text style={s.title}>The wheel decides.</Text>
         <View style={s.row}>{groups.map((g) => <Chip key={g.id} label={g.name} active={groupId === g.id} onPress={() => setGroupId(g.id)} />)}</View>
         {!group ? <View style={s.card}><Text style={s.section}>Bring everyone together</Text><Text style={s.muted}>Create a group or join one with a room code. Then add a few titles to your watchlist.</Text><Button label="Go to groups" onPress={() => setPage('groups')} /></View> : <>
-          {spin && !animating && <View style={s.featured}><Text style={s.eyebrow}>{spin.state === 'accepted' ? 'TONIGHT’S PICK' : 'THE WHEEL HAS SPOKEN'}</Text><Text style={s.goldText}>{spin.result.profile_name}’s pick</Text>
+          {spin && !animating && <View style={s.featured}><Text style={s.eyebrow}>{spin.state === 'accepted' ? 'TONIGHT’S PICK' : spin.state === 'cancelled' ? 'ROUND CANCELLED' : 'THE WHEEL HAS SPOKEN'}</Text><Text style={s.goldText}>{spin.result.profile_name}’s pick</Text>
             <View style={s.featuredRow}><Poster title={spin.result.title} path={spin.result.posterPath} size={105} /><View style={{ flex: 1 }}><Text style={s.featuredTitle}>{spin.result.title}</Text><Text style={s.muted}>{kindLabel(spin.result.kind)}{spin.result.year ? ` · ${spin.result.year}` : ''}</Text><Text style={s.small} numberOfLines={4}>{spin.result.overview || 'From the winning watchlist.'}</Text></View></View>
-            {spin.state === 'active' ? <View style={s.row}><Button label="Watch this" onPress={viewOptions} disabled={busy} /><Button label="Skip title" quiet onPress={() => spinAction('skip')} disabled={!spin.canSkip || busy} /></View> : <Text style={s.goldText}>✓ Saved as tonight’s pick</Text>}
+            {spin.state === 'active' ? <View style={s.row}><Button label="Watch this" onPress={viewOptions} disabled={busy} /><Button label="Details" quiet onPress={() => openTitleDetails(spin.result)} /><Button label="Skip title" quiet onPress={() => spinAction('skip')} disabled={!spin.canSkip || busy} /></View> : spin.state === 'accepted' ? <Text style={s.goldText}>✓ Saved as tonight’s pick</Text> : <Text style={s.hint}>A participating profile became unavailable. Start a fresh spin with the active group members.</Text>}
+            {winningOwnItem?.status === 'watched' ? <Text style={s.goldText}>✓ Marked watched on your list</Text> : winningOwnItem ? <Button label="Mark as watched" quiet onPress={markResultWatched} disabled={busy} /> : <Text style={s.small}>{isWinningOwner ? 'This title is no longer on your watchlist.' : `Only ${spin.result.profile_name} can mark this title as watched.`}</Text>}
           </View>}
           {showOptions && <View style={s.card}><Text style={s.eyebrow}>UNITED KINGDOM</Text><Text style={s.section}>Where to watch</Text>
             {!options ? <ActivityIndicator color={gold} /> : !options.configured ? <Text style={s.muted}>Viewing options are not connected yet. Add a TMDB API token to enable UK availability.</Text> : options.offers.length ? <><Text style={s.muted}>JustWatch data via TMDB. Check the service before paying or subscribing.</Text>{options.offers.map((o, i) => <View key={`${o.provider}-${o.accessType}-${i}`} style={s.offer}><Text style={s.white}>{o.provider}</Text><Text style={s.goldText}>{o.accessType}</Text></View>)}{options.checkedAt && <Text style={s.small}>Checked {new Date(options.checkedAt).toLocaleString('en-GB')}</Text>}{options.link && <Button label="View options on TMDB" onPress={() => { Linking.openURL(options.link!); spinAction('accept'); }} />}</> : <Text style={s.muted}>No verified viewing options found in the United Kingdom. You can still save this pick.</Text>}
             {spin?.state === 'active' && <Button label="Save as tonight’s pick" quiet onPress={() => spinAction('accept')} disabled={busy} />}<Button label="Close" quiet onPress={() => setShowOptions(false)} /></View>}
           <View style={s.card}><Text style={s.eyebrow}>ROUND SETUP</Text><Text style={s.section}>Who’s in?</Text>
-            <View style={s.memberGrid}>{members.map((m) => { const count = groupItems.filter((i) => i.profileId === m.profileId && (filter === 'both' || i.kind === filter)).length; return <Pressable key={m.profileId} accessibilityRole="checkbox" accessibilityState={{ checked: selected.includes(m.profileId) }} onPress={() => setSelected((old) => old.includes(m.profileId) ? old.filter((id) => id !== m.profileId) : [...old, m.profileId])} style={[s.member, selected.includes(m.profileId) && s.memberSelected]}><View style={[s.avatar, { backgroundColor: m.colour || gold }]}><Text style={s.avatarText}>{m.name[0].toUpperCase()}</Text></View><View style={{ flex: 1 }}><Text style={s.white}>{m.name}</Text><Text style={s.small}>{count} eligible {count === 1 ? 'title' : 'titles'}</Text></View><Text style={s.goldText}>{selected.includes(m.profileId) ? '✓' : '+'}</Text></Pressable>; })}</View>
+            <View style={s.memberGrid}>{members.map((m) => { const count = m.active ? groupItems.filter((i) => i.profileId === m.profileId && (filter === 'both' || i.kind === filter)).length : 0; return <Pressable key={m.profileId} accessibilityRole="checkbox" accessibilityState={{ checked: selected.includes(m.profileId), disabled: !m.active }} disabled={!m.active} onPress={() => setSelected((old) => old.includes(m.profileId) ? old.filter((id) => id !== m.profileId) : [...old, m.profileId])} style={[s.member, selected.includes(m.profileId) && s.memberSelected, !m.active && s.memberInactive]}><View style={[s.avatar, { backgroundColor: m.colour || gold }]}><Text style={s.avatarText}>{m.name[0].toUpperCase()}</Text></View><View style={{ flex: 1 }}><Text style={s.white}>{m.name}</Text><Text style={s.small}>{m.active ? `${count} eligible ${count === 1 ? 'title' : 'titles'}` : 'Profile paused'}</Text></View><Text style={s.goldText}>{m.active ? selected.includes(m.profileId) ? '✓' : '+' : 'Paused'}</Text></Pressable>; })}</View>
             <Text style={s.label}>Include</Text><View style={s.row}><Chip label="Films & series" active={filter === 'both'} onPress={() => setFilter('both')} /><Chip label="Films" active={filter === 'movie'} onPress={() => setFilter('movie')} /><Chip label="Series" active={filter === 'series'} onPress={() => setFilter('series')} /></View>
             {!canSpin && <Text style={s.hint}>Everyone selected needs an eligible title for this filter.</Text>}
             <Text style={s.small}>Every selected person has equal odds, however long their watchlist is.</Text><Button label={spin?.state === 'active' ? 'Spin again' : 'Spin the wheel'} onPress={startSpin} disabled={!canSpin || busy || animating} />
@@ -196,36 +283,58 @@ export default function App() {
         </>}
       </>}
 
-      {page === 'watchlist' && <><Text style={s.eyebrow}>YOUR PICKS</Text><Text style={s.title}>Watchlist</Text><Text style={s.muted}>Only you can edit your list. Eligible titles are visible to your groups.</Text>
-        <View style={s.card}><Text style={s.section}>Add a title</Text><Field label="Search films and series" value={query} onChangeText={setQuery} placeholder="Search by title" /><Button label="Search catalogue" onPress={search} disabled={busy} />
+      {page === 'watchlist' && <><Text style={s.eyebrow}>YOUR PICKS</Text><Text style={s.title}>Watchlist</Text><Text style={s.muted}>Only you can edit your list. Group members can see your eligible titles, but not your watched titles.</Text>
+        <View style={s.card}><Text style={s.section}>Add a title</Text><Field label="Search films and series" value={query} onChangeText={setQuery} placeholder="Search by title" /><View style={s.row}><Button label="Search catalogue" onPress={search} disabled={busy} /><Button label="Browse popular" quiet onPress={browsePopular} disabled={busy} /></View>
           {!catalogueConnected && <Text style={s.hint}>Catalogue search needs a TMDB API token. You can add a title manually.</Text>}
           {searchResults.map((r) => <Pressable key={`${r.kind}-${r.tmdbId}`} onPress={() => addItem(r)} style={s.listRow}><Poster title={r.title} path={r.posterPath} size={44} /><View style={{ flex: 1 }}><Text style={s.white}>{r.title}</Text><Text style={s.small}>{kindLabel(r.kind)}{r.year ? ` · ${r.year}` : ''}</Text></View><Text style={s.goldText}>＋</Text></Pressable>)}
+          {cataloguePage > 0 && cataloguePage < catalogueTotalPages && <Button label="Load more catalogue results" quiet onPress={() => loadCatalogue(cataloguePage + 1, true)} disabled={busy} />}
           <View style={s.rule} /><Text style={s.label}>Or add your own</Text><Field label="Title" value={manualTitle} onChangeText={setManualTitle} placeholder="Film or series title" /><View style={s.row}><Chip label="Film" active={manualKind === 'movie'} onPress={() => setManualKind('movie')} /><Chip label="Series" active={manualKind === 'series'} onPress={() => setManualKind('series')} /></View><Button label="Add to watchlist" onPress={() => addItem({ title: manualTitle, kind: manualKind })} disabled={!manualTitle.trim() || busy} />
         </View><Text style={s.section}>Your titles <Text style={s.small}>· {watchlist.length} total, {eligibleOwn} eligible</Text></Text>
-        {!watchlist.length ? <Text style={s.muted}>Your list starts here. Add a film or series above.</Text> : watchlist.map((item) => <View key={item.id} style={s.itemCard}><Poster title={item.title} path={item.posterPath} size={62} /><View style={{ flex: 1, gap: 6 }}><Text style={s.white}>{item.title}</Text><Text style={s.small}>{kindLabel(item.kind)}{item.year ? ` · ${item.year}` : ''}</Text><View style={s.row}>{(['want', 'watching', 'watched'] as Status[]).map((status) => <Chip key={status} label={statusLabel(status)} active={item.status === status} onPress={() => changeStatus(item, status)} />)}</View><Pressable onPress={() => removeItem(item)}><Text style={s.remove}>Remove</Text></Pressable></View></View>)}
+        {!watchlist.length ? <Text style={s.muted}>Your list starts here. Add a film or series above.</Text> : watchlist.map((item) => <View key={item.id} style={s.itemCard}><Poster title={item.title} path={item.posterPath} size={62} /><View style={{ flex: 1, gap: 6 }}><Text style={s.white}>{item.title}</Text><Text style={s.small}>{kindLabel(item.kind)}{item.year ? ` · ${item.year}` : ''}</Text><View style={s.row}>{(['want', 'watching', 'watched'] as Status[]).map((status) => <Chip key={status} label={statusLabel(status)} active={item.status === status} onPress={() => changeStatus(item, status)} />)}</View><View style={s.row}><Pressable accessibilityRole="button" onPress={() => openTitleDetails(item)}><Text style={s.goldText}>Details</Text></Pressable><Pressable accessibilityRole="button" onPress={() => removeItem(item)}><Text style={s.remove}>Remove</Text></Pressable></View></View></View>)}
+        {group && <View style={s.card}><Text style={s.eyebrow}>{group.name.toUpperCase()}</Text><Text style={s.section}>Group watchlists</Text><Text style={s.muted}>Browse titles your group can include in the wheel. Only the list owner can make changes.</Text>
+          {!sharedMembers.length ? <Text style={s.hint}>Invite someone to this group to see their eligible titles here.</Text> : <>
+            <View style={s.row}>{sharedMembers.map((member) => <Chip key={member.profileId} label={`${member.name} · ${groupItems.filter((item) => item.profileId === member.profileId).length}`} active={viewedMember?.profileId === member.profileId} onPress={() => setViewedProfileId(member.profileId)} />)}</View>
+            <Text style={s.label}>{viewedMember.name}’s eligible titles</Text>
+            {!sharedItems.length ? <Text style={s.muted}>Nothing eligible yet. They can add a film or series to their own watchlist.</Text> : sharedItems.map((item) => <View key={item.id} style={s.listRow}><Poster title={item.title} path={item.posterPath} size={48} /><View style={{ flex: 1 }}><Text style={s.white}>{item.title}</Text><Text style={s.small}>{kindLabel(item.kind)}{item.year ? ` · ${item.year}` : ''} · {statusLabel(item.status)}</Text></View></View>)}
+          </>}
+        </View>}
       </>}
 
       {page === 'groups' && <><Text style={s.eyebrow}>YOUR PEOPLE</Text><Text style={s.title}>Groups</Text><Text style={s.muted}>Keep your own watchlist, share it with the people you watch with.</Text>
         <View style={s.card}><Text style={s.section}>Create a group</Text><Field label="Group name" value={groupName} onChangeText={setGroupName} placeholder="Friday film club" /><Button label="Create group" onPress={createGroup} disabled={!groupName.trim() || busy} /></View>
         <View style={s.card}><Text style={s.section}>Join a group</Text><Field label="Room code" value={roomCode} onChangeText={(value) => { setRoomCode(value.toUpperCase()); setPreview(null); }} placeholder="Enter invite code" /><Button label="Check code" onPress={checkCode} disabled={!roomCode.trim() || busy} />
-          {preview && <View style={s.preview}><Text style={s.white}>{preview.name}</Text><Text style={s.small}>{preview.memberCount} {preview.memberCount === 1 ? 'member' : 'members'}</Text><Button label="Join this group" onPress={joinGroup} disabled={busy} /></View>}</View>
+          {preview && <View style={s.preview}><Text style={s.eyebrow}>{preview.alreadyMember ? 'YOU ARE ALREADY A MEMBER' : 'CONFIRM YOUR GROUP'}</Text><Text style={s.section}>{preview.name}</Text><Text style={s.small}>{preview.memberCount} current {preview.memberCount === 1 ? 'member' : 'members'}</Text><View style={s.inviteMembers}>{preview.members.map((member) => <View key={member.profileId} style={s.inviteMember}><View style={[s.avatar, { backgroundColor: member.colour || gold }]}><Text style={s.avatarText}>{member.name[0].toUpperCase()}</Text></View><View><Text style={s.white}>{member.name}</Text>{member.role === 'owner' && <Text style={s.small}>Group owner</Text>}</View></View>)}</View>{!preview.alreadyMember && <Text style={s.muted}>Joining will make your eligible watchlist titles visible to these group members.</Text>}<Button label={preview.alreadyMember ? 'Open group' : 'Join this group'} onPress={joinGroup} disabled={busy} /></View>}</View>
         {groups.map((g) => <Pressable key={g.id} style={[s.itemCard, groupId === g.id && { borderColor: gold }]} onPress={() => { setGroupId(g.id); setInvite(null); }}><View style={{ flex: 1 }}><Text style={s.white}>{g.name}</Text><Text style={s.small}>{g.memberCount} members · United Kingdom</Text></View><Text style={s.goldText}>{groupId === g.id ? 'Selected' : 'View ›'}</Text></Pressable>)}
         {group && <View style={s.card}><Text style={s.section}>{group.name}</Text>{members.map((m) => <View key={m.accountId} style={s.memberLine}><View style={[s.avatar, { backgroundColor: m.colour || gold }]}><Text style={s.avatarText}>{m.name[0].toUpperCase()}</Text></View><View style={{ flex: 1 }}><Text style={s.white}>{m.name}</Text>{m.role === 'owner' && <Text style={s.small}>Owner</Text>}</View>
           {group.role === 'owner' && m.accountId !== me?.id && <View style={s.row}><Pressable onPress={() => transferOwnership(m.accountId, m.name)}><Text style={s.goldText}>Make owner</Text></Pressable><Pressable onPress={() => removeMember(m.accountId, m.name)}><Text style={s.remove}>Remove</Text></Pressable></View>}
         </View>)}
-          {group.role === 'owner' ? <><View style={s.rule} /><Button label="Create invite link & room code" onPress={createInvite} disabled={busy} />{invite && <View style={s.preview}><Text style={s.eyebrow}>ROOM CODE · EXPIRES IN 7 DAYS</Text><Text selectable style={s.code}>{invite.code}</Text><Text selectable style={s.small}>{invite.link}</Text><Button label="Share invite" quiet onPress={() => { Share.share({ message: `Join my TV Showdown group: ${invite.link}\nRoom code: ${invite.code}` }); }} /></View>}<Button label="Revoke all invites" quiet onPress={revokeInvites} disabled={busy} /></> : <><View style={s.rule} /><Button label="Leave group" quiet onPress={leaveGroup} disabled={busy} /></>}
+          {group.role === 'owner' ? <><View style={s.rule} /><Text style={s.label}>Group settings</Text><Field label="Group name" value={groupEditName} onChangeText={setGroupEditName} placeholder="Friday film club" /><Button label="Save group name" quiet onPress={renameGroup} disabled={!groupEditName.trim() || groupEditName.trim() === group.name || busy} /><View style={s.rule} /><Button label="Create invite link & room code" onPress={createInvite} disabled={busy} />{invite && <View style={s.preview}><Text style={s.eyebrow}>ROOM CODE · EXPIRES IN 7 DAYS</Text><Text selectable style={s.code}>{invite.code}</Text><Text selectable style={s.small}>{invite.link}</Text><Button label="Share invite" quiet onPress={() => { Share.share({ message: `Join my TV Showdown group: ${invite.link}\nRoom code: ${invite.code}` }); }} /></View>}<Button label="Revoke all invites" quiet onPress={revokeInvites} disabled={busy} /><View style={s.rule} /><Text style={s.small}>Deleting a group also removes its invites and shared spin history. Personal watchlists are not affected.</Text><Pressable accessibilityRole="button" disabled={busy} onPress={deleteGroup} style={[s.dangerButton, busy && { opacity: .4 }]}><Text style={s.dangerButtonText}>Delete group</Text></Pressable></> : <><View style={s.rule} /><Button label="Leave group" quiet onPress={leaveGroup} disabled={busy} /></>}
         </View>}
       </>}
 
-      {page === 'history' && <><Text style={s.eyebrow}>PREVIOUS ROUNDS</Text><Text style={s.title}>History</Text>{!history.length ? <Text style={s.muted}>No spins yet. The first result will appear here.</Text> : history.map((h) => <View key={h.id} style={s.itemCard}><Text style={s.historyStar}>✦</Text><View style={{ flex: 1 }}><Text style={s.white}>{h.title}</Text><Text style={s.small}>{h.winnerName}’s pick · {kindLabel(h.kind)} · {new Date(h.createdAt + 'Z').toLocaleString('en-GB')}</Text></View><Text style={s.goldText}>{h.resultState === 'accepted' ? 'Chosen' : h.state === 'superseded' ? 'Re-spun' : 'Pending'}</Text></View>)}</>}
+      {page === 'history' && <><Text style={s.eyebrow}>PREVIOUS ROUNDS</Text><Text style={s.title}>History</Text><Text style={s.muted}>Every result is kept here, including titles the group skipped before making its choice.</Text>{!history.length ? <Text style={s.muted}>No spins yet. The first result will appear here.</Text> : history.map((h) => { const outcome = historyOutcome(h); return <View key={h.id} style={s.itemCard}><Text style={[s.historyStar, h.resultState === 'skipped' && s.historyStarSkipped]}>{h.resultState === 'accepted' ? '✓' : h.resultState === 'skipped' ? '↷' : '✦'}</Text><View style={{ flex: 1 }}><Text style={[s.white, h.resultState === 'skipped' && s.historyTitleSkipped]}>{h.title}</Text><Text style={s.small}>{h.winnerName}’s pick · {kindLabel(h.kind)}{h.year ? ` · ${h.year}` : ''}</Text><Text style={s.small}>{new Date(h.createdAt + 'Z').toLocaleString('en-GB')}</Text></View><View style={[s.historyBadge, h.resultState === 'accepted' && s.historyBadgeChosen, h.resultState === 'skipped' && s.historyBadgeSkipped]}><Text style={[s.historyBadgeText, h.resultState === 'accepted' && s.historyBadgeTextChosen]}>{outcome}</Text></View></View>; })}</>}
 
-      {page === 'profile' && <><Text style={s.eyebrow}>YOUR ACCOUNT</Text><Text style={s.title}>Profile</Text><View style={s.card}><Text style={s.section}>{me?.name}</Text><Text style={s.small}>{me?.email}</Text><Field label="Display name" value={profileName} onChangeText={setProfileName} /><Button label="Save name" onPress={() => perform(async () => { await api('/api/me', token, 'PATCH', { name: profileName }); await refreshBase(token!); })} disabled={!profileName.trim() || busy} /><Button label="Sign out" quiet onPress={signOut} /></View>
+      {page === 'profile' && <><Text style={s.eyebrow}>YOUR ACCOUNT</Text><Text style={s.title}>Profile</Text><View style={s.card}>
+        <View style={s.profilePreview}><View style={[s.profileAvatar, { backgroundColor: profileColour }]}><Text style={s.profileInitial}>{(profileName.trim()[0] || '?').toUpperCase()}</Text></View><View style={{ flex: 1 }}><Text style={s.section}>{profileName.trim() || me?.name}</Text><Text style={s.small}>{me?.email}</Text></View></View>
+        <View style={s.profileStatus}><View style={[s.profileStatusDot, !me?.active && s.profileStatusDotPaused]} /><View style={{ flex: 1 }}><Text style={s.white}>{me?.active ? 'Active for group wheels' : 'Profile paused'}</Text><Text style={s.small}>{me?.active ? 'Group members can include you in a spin.' : 'Your account, groups and personal watchlist are still available.'}</Text></View></View><Field label="Display name" value={profileName} onChangeText={setProfileName} />
+        <Text style={s.label}>Profile colour</Text><View accessibilityRole="radiogroup" style={s.colourRow}>{profileColours.map((choice) => <Pressable key={choice.value} accessibilityLabel={`${choice.label} profile colour`} accessibilityRole="radio" accessibilityState={{ checked: profileColour === choice.value }} onPress={() => setProfileColour(choice.value)} style={[s.colourChoice, { backgroundColor: choice.value }, profileColour === choice.value && s.colourSelected]}><Text style={s.colourTick}>{profileColour === choice.value ? '✓' : ''}</Text></Pressable>)}</View>
+        <Text style={s.small}>Your colour identifies you in groups and on the wheel.</Text><Button label="Save profile" onPress={saveProfile} disabled={!profileName.trim() || busy} /><Button label={me?.active ? 'Pause profile' : 'Reactivate profile'} quiet onPress={toggleProfile} disabled={busy} /><Button label="Sign out" quiet onPress={signOut} /></View>
         <View style={s.card}><Text style={s.section}>About TV Showdown</Text><Text style={s.muted}>Every spin chooses one person, then one title from their eligible watchlist. Watching series stay in the draw.</Text><Text style={s.muted}>Viewing information is for the United Kingdom. Check the provider before paying.</Text><Text style={s.small}>This product uses the TMDB API but is not endorsed or certified by TMDB. UK viewing data: JustWatch via TMDB.</Text></View></>}
       {busy && <ActivityIndicator color={gold} />}
     </ScrollView>
       {!desktop && <View style={s.bottomNav}>{nav.map((n) => <Pressable key={n.page} accessibilityRole="tab" accessibilityState={{ selected: page === n.page }} onPress={() => { setPage(n.page); setError(''); }} style={s.bottomLink}><Text style={[s.bottomIcon, page === n.page && { color: gold }]}>{n.icon}</Text><Text style={[s.bottomText, page === n.page && { color: gold }]}>{n.label}</Text></Pressable>)}</View>}
     </View>
-  </View></View>;
+  </View>
+    <Modal visible={showDetails} transparent animationType="fade" onRequestClose={() => setShowDetails(false)}>
+      <View style={s.modalBackdrop}><ScrollView contentContainerStyle={s.modalScroll}><View accessibilityViewIsModal style={s.modalCard}>
+        <Text style={s.eyebrow}>TITLE DETAILS</Text>
+        {detailTitle && <><View style={s.detailHero}><Poster title={detailTitle.title} path={detailTitle.posterPath} size={118} /><View style={s.detailHeading}><Text style={s.detailTitle}>{detailTitle.title}</Text><Text style={s.muted}>{kindLabel(detailTitle.kind)}{detailTitle.year ? ` · ${detailTitle.year}` : ''}</Text>{detailTitle.voteAverage != null && <Text style={s.goldText}>★ {detailTitle.voteAverage.toFixed(1)}{detailTitle.voteCount ? ` · ${detailTitle.voteCount.toLocaleString('en-GB')} votes` : ''}</Text>}</View></View>
+          {detailsLoading ? <ActivityIndicator color={gold} /> : <>{!detailsConnected && <Text style={s.hint}>Live catalogue details are not connected. Showing the metadata already saved with this title.</Text>}{!detailTitle.tmdbId && <Text style={s.hint}>This title was added manually, so extended catalogue details are unavailable.</Text>}{detailTitle.overview ? <Text style={s.detailOverview}>{detailTitle.overview}</Text> : <Text style={s.muted}>No synopsis is available for this title.</Text>}<View style={s.detailFacts}>{detailTitle.runtime ? <Text style={s.detailFact}>{detailTitle.kind === 'series' ? 'Typical episode' : 'Runtime'} · {detailTitle.runtime} mins</Text> : null}{detailTitle.status ? <Text style={s.detailFact}>Catalogue status · {detailTitle.status}</Text> : null}</View>{detailTitle.genres?.length ? <View style={s.row}>{detailTitle.genres.map((genre) => <View key={genre} style={s.genre}><Text style={s.genreText}>{genre}</Text></View>)}</View> : null}</>}
+        </>}
+        <Button label="Close details" quiet onPress={() => setShowDetails(false)} />
+      </View></ScrollView></View>
+    </Modal>
+  </View>;
 }
 
 const s = StyleSheet.create({
@@ -233,8 +342,12 @@ const s = StyleSheet.create({
   brand: { color: '#FFF9F2', fontSize: 19, fontWeight: '900', letterSpacing: 1.4 }, sidebar: { width: 235, backgroundColor: '#1B1A1E', borderRightWidth: 1, borderRightColor: '#343139', padding: 22, paddingTop: 36 }, sideCaption: { color: '#88818B', fontSize: 10, letterSpacing: 2, marginTop: 8, marginBottom: 42 }, sideLink: { padding: 13, flexDirection: 'row', alignItems: 'center', gap: 13, borderRadius: 12, marginBottom: 5 }, sideLinkActive: { backgroundColor: '#37312B' }, sideIcon: { color: gold, fontSize: 21, width: 23 }, sideText: { color: '#B9B1B9', fontSize: 16, fontWeight: '700' }, sideFooter: { color: '#6F6A70', fontSize: 10, marginTop: 'auto' },
   eyebrow: { color: gold, fontWeight: '800', fontSize: 12, letterSpacing: 2.3 }, title: { color: '#FFF9F4', fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', fontSize: 38, lineHeight: 44, fontWeight: '700' }, section: { color: '#FAF7F3', fontSize: 23, fontWeight: '700' }, featuredTitle: { color: '#FFF', fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', fontSize: 34, lineHeight: 39 }, white: { color: '#FAF7F3', fontSize: 16, fontWeight: '700' }, goldText: { color: gold, fontSize: 14, fontWeight: '800' }, muted: { color: '#B9B2B8', fontSize: 15, lineHeight: 22 }, small: { color: '#9B959D', fontSize: 13, lineHeight: 19 }, label: { color: '#E1DADD', fontSize: 14, fontWeight: '700' }, intro: { color: '#C1B7BC', fontSize: 18 }, hint: { color: '#E7C287', fontSize: 14, lineHeight: 21 }, footer: { color: '#88818B', textAlign: 'center', marginTop: 25 },
   card: { backgroundColor: '#1E1D21', borderColor: '#3A363D', borderWidth: 1, borderRadius: 20, padding: 20, gap: 15 }, featured: { backgroundColor: '#2B232A', borderColor: '#6B4E47', borderWidth: 1, borderRadius: 22, padding: 22, gap: 16 }, featuredRow: { flexDirection: 'row', gap: 17, alignItems: 'center' }, row: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, alignItems: 'center' }, rule: { backgroundColor: '#49434B', height: 1, marginVertical: 4 },
-  memberGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, member: { minWidth: 165, flexBasis: 175, flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: '#29272B', borderWidth: 1, borderColor: '#49444D', borderRadius: 13 }, memberSelected: { borderColor: gold, backgroundColor: '#3A322B' }, avatar: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' }, avatarText: { color: '#201C19', fontSize: 17, fontWeight: '900' }, wheelCard: { backgroundColor: '#211F23', borderRadius: 20, padding: 16, gap: 12, alignItems: 'center' },
-  offer: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#48424A', paddingVertical: 10, gap: 10 }, itemCard: { backgroundColor: '#1E1D21', borderColor: '#39353C', borderWidth: 1, borderRadius: 15, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 13 }, listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: '#3C3740', paddingVertical: 9 }, remove: { color: '#DB999D', fontSize: 13, marginTop: 3 }, preview: { backgroundColor: '#363029', borderRadius: 12, padding: 13, gap: 10 }, code: { color: gold, fontSize: 28, fontWeight: '900', letterSpacing: 4 }, memberLine: { flexDirection: 'row', alignItems: 'center', gap: 11 }, historyStar: { color: gold, backgroundColor: '#463621', fontSize: 23, width: 44, height: 44, borderRadius: 22, textAlign: 'center', lineHeight: 44 },
+  memberGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 }, member: { minWidth: 165, flexBasis: 175, flexGrow: 1, flexDirection: 'row', alignItems: 'center', gap: 10, padding: 10, backgroundColor: '#29272B', borderWidth: 1, borderColor: '#49444D', borderRadius: 13 }, memberSelected: { borderColor: gold, backgroundColor: '#3A322B' }, memberInactive: { opacity: .55, backgroundColor: '#222125', borderColor: '#38353B' }, avatar: { width: 36, height: 36, borderRadius: 18, justifyContent: 'center', alignItems: 'center' }, avatarText: { color: '#201C19', fontSize: 17, fontWeight: '900' }, wheelCard: { backgroundColor: '#211F23', borderRadius: 20, padding: 16, gap: 12, alignItems: 'center' }, profileStatus: { flexDirection: 'row', alignItems: 'center', gap: 11, borderRadius: 12, backgroundColor: '#29272B', padding: 12 }, profileStatusDot: { width: 11, height: 11, borderRadius: 6, backgroundColor: '#83C69B' }, profileStatusDotPaused: { backgroundColor: '#A59EA6' },
+  profilePreview: { flexDirection: 'row', alignItems: 'center', gap: 14 }, profileAvatar: { width: 64, height: 64, borderRadius: 32, justifyContent: 'center', alignItems: 'center' }, profileInitial: { color: '#1D1A1D', fontSize: 26, fontWeight: '900' }, colourRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 11 }, colourChoice: { width: 44, height: 44, borderRadius: 22, borderWidth: 2, borderColor: 'transparent', alignItems: 'center', justifyContent: 'center' }, colourSelected: { borderColor: '#FFF9F2' }, colourTick: { color: '#1C191C', fontSize: 20, fontWeight: '900' },
+  offer: { flexDirection: 'row', justifyContent: 'space-between', borderBottomWidth: 1, borderBottomColor: '#48424A', paddingVertical: 10, gap: 10 }, itemCard: { backgroundColor: '#1E1D21', borderColor: '#39353C', borderWidth: 1, borderRadius: 15, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 13 }, listRow: { flexDirection: 'row', alignItems: 'center', gap: 12, borderBottomWidth: 1, borderBottomColor: '#3C3740', paddingVertical: 9 }, remove: { color: '#DB999D', fontSize: 13, marginTop: 3 }, preview: { backgroundColor: '#363029', borderRadius: 12, padding: 13, gap: 10 }, code: { color: gold, fontSize: 28, fontWeight: '900', letterSpacing: 4 }, memberLine: { flexDirection: 'row', alignItems: 'center', gap: 11 }, historyStar: { color: gold, backgroundColor: '#463621', fontSize: 23, width: 44, height: 44, borderRadius: 22, textAlign: 'center', lineHeight: 44 }, historyStarSkipped: { color: '#A8A1A9', backgroundColor: '#302D32' }, historyTitleSkipped: { color: '#A8A1A9', textDecorationLine: 'line-through' }, historyBadge: { borderRadius: 999, borderWidth: 1, borderColor: '#625D65', paddingHorizontal: 10, paddingVertical: 6, backgroundColor: '#29272C' }, historyBadgeChosen: { borderColor: '#8F7037', backgroundColor: '#514126' }, historyBadgeSkipped: { borderColor: '#49464D', backgroundColor: '#242328' }, historyBadgeText: { color: '#C9C2C9', fontSize: 11, fontWeight: '800' }, historyBadgeTextChosen: { color: '#FFE2A6' },
+  modalBackdrop: { flex: 1, backgroundColor: 'rgba(8,8,11,.86)', justifyContent: 'center', padding: 18 }, modalScroll: { flexGrow: 1, justifyContent: 'center' }, modalCard: { width: '100%', maxWidth: 650, alignSelf: 'center', backgroundColor: '#211F23', borderColor: '#5A5056', borderWidth: 1, borderRadius: 22, padding: 22, gap: 17 }, detailHero: { flexDirection: 'row', alignItems: 'center', gap: 18 }, detailHeading: { flex: 1, gap: 8 }, detailTitle: { color: '#FFF9F2', fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif', fontSize: 31, lineHeight: 36, fontWeight: '700' }, detailOverview: { color: '#D1C9CE', fontSize: 15, lineHeight: 23 }, detailFacts: { gap: 7, borderTopWidth: 1, borderTopColor: '#49434B', paddingTop: 13 }, detailFact: { color: '#E0DADF', fontSize: 14, fontWeight: '700' }, genre: { backgroundColor: '#44392B', borderColor: '#705C3D', borderWidth: 1, borderRadius: 20, paddingHorizontal: 11, paddingVertical: 7 }, genreText: { color: '#F2D299', fontSize: 12, fontWeight: '800' },
+  inviteMembers: { gap: 10 }, inviteMember: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   bottomNav: { flexDirection: 'row', backgroundColor: '#1E1C21', borderTopWidth: 1, borderTopColor: '#3C3840', paddingTop: 8, paddingBottom: Platform.OS === 'ios' ? 20 : 8 }, bottomLink: { flex: 1, alignItems: 'center', gap: 2 }, bottomIcon: { color: '#88828A', fontSize: 22 }, bottomText: { color: '#928B93', fontSize: 11, fontWeight: '700' },
+  dangerButton: { alignSelf: 'flex-start', minHeight: 44, justifyContent: 'center', borderWidth: 1, borderColor: '#8D5559', backgroundColor: '#412A2D', borderRadius: 12, paddingHorizontal: 16, paddingVertical: 10 }, dangerButtonText: { color: '#FFBFC2', fontSize: 14, fontWeight: '800' },
   errorBox: { backgroundColor: '#4F3033', borderColor: '#9A6063', borderWidth: 1, borderRadius: 10, padding: 12 }, error: { color: '#FFCECF', fontSize: 14 }, authContent: { flexGrow: 1, width: '100%', maxWidth: 540, alignSelf: 'center', justifyContent: 'center', padding: 25, gap: 20 }, authTitle: { color: '#FFFAF3', fontSize: 72, lineHeight: 74, fontFamily: Platform.OS === 'ios' ? 'Georgia' : 'serif' },
 });

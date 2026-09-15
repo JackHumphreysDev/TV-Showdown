@@ -1,0 +1,17 @@
+{
+  "id": "/",
+  "name": "TV Showdown",
+  "short_name": "TV Showdown",
+  "description": "Pick a person, then a film or series from their watchlist.",
+  "lang": "en-GB",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#111114",
+  "theme_color": "#111114",
+  "categories": ["entertainment"],
+  "icons": [
+    { "src": "/pwa-icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/pwa-icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" }
+  ]
+}
