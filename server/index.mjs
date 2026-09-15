@@ -2,7 +2,8 @@ import http from 'node:http';
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { db, transaction } from './db.mjs';
 import { eligible, draw, inviteCode } from './core.mjs';
-import { searchTitles, availability } from './tmdb.mjs';
+import { groupHistory } from './history.mjs';
+import { searchTitles, catalogueTitles, titleDetails, availability } from './tmdb.mjs';
 
 const port = Number(process.env.PORT || 4000);
 const host = process.env.HOST || '127.0.0.1';
@@ -227,6 +228,22 @@ async function route(request) {
     run('DELETE FROM watchlist WHERE id=?', itemMatch[1]);
     return { ok: true };
   }
+  if (method === 'GET' && path === '/api/catalogue') {
+    const rawKind = url.searchParams.get('kind') || 'both';
+    if (!['both', 'movie', 'series'].includes(rawKind)) fail(400, 'Invalid catalogue type');
+    const rawPage = url.searchParams.get('page') || '1';
+    const page = Number(rawPage);
+    if (!/^\d+$/.test(rawPage) || !Number.isSafeInteger(page) || page < 1 || page > 500) fail(400, 'Catalogue page must be between 1 and 500');
+    const query = String(url.searchParams.get('q') || '').trim();
+    if (query.length > 120) fail(400, 'Search must be 120 characters or fewer');
+    return catalogueTitles({ query, kind: rawKind, page });
+  }
+  const catalogueMatch = path.match(/^\/api\/catalogue\/(movie|series)\/(\d+)$/);
+  if (catalogueMatch && method === 'GET') {
+    const tmdbId = Number(catalogueMatch[2]);
+    if (!Number.isSafeInteger(tmdbId) || tmdbId <= 0) fail(400, 'Invalid title');
+    return titleDetails(catalogueMatch[1], tmdbId);
+  }
   if (method === 'GET' && path === '/api/search') return searchTitles(requiredText(url.searchParams.get('q'), 'Search', 120));
   if (method === 'GET' && path === '/api/availability') {
     const kind = url.searchParams.get('kind');
@@ -243,11 +260,7 @@ async function route(request) {
   if (method === 'GET' && action === 'current') { member(groupId, me.id); return latestSession(groupId); }
   if (method === 'GET' && action === 'history') {
     member(groupId, me.id);
-    return all(`SELECT ss.id, ss.state, ss.created_at AS createdAt, sr.profile_name AS winnerName,
-      sr.title, sr.kind, sr.year, sr.state AS resultState
-      FROM spin_sessions ss JOIN spin_results sr ON sr.session_id=ss.id
-      WHERE ss.group_id=? AND sr.rowid=(SELECT MAX(rowid) FROM spin_results WHERE session_id=ss.id)
-      ORDER BY ss.rowid DESC LIMIT 30`, groupId);
+    return groupHistory(db, groupId);
   }
   if (method === 'POST' && action === 'invite') {
     owner(groupId, me.id);

@@ -40,3 +40,5 @@ output('favicon.png', 48, 'colour', false);
 output('android-icon-foreground.png', 512, 'colour', true);
 output('android-icon-background.png', 512, 'colour', false);
 output('android-icon-monochrome.png', 432, 'mono', true);
+writeFileSync(resolve('app/public/pwa-icon-192.png'), png(192));
+writeFileSync(resolve('app/public/pwa-icon-512.png'), png(512));
