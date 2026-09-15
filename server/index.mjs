@@ -2,6 +2,7 @@ import http from 'node:http';
 import { randomBytes, randomUUID, scryptSync, timingSafeEqual, createHash } from 'node:crypto';
 import { db, transaction } from './db.mjs';
 import { eligible, draw, inviteCode } from './core.mjs';
+import { groupHistory } from './history.mjs';
 import { searchTitles, catalogueTitles, titleDetails, availability } from './tmdb.mjs';
 
 const port = Number(process.env.PORT || 4000);
@@ -259,11 +260,7 @@ async function route(request) {
   if (method === 'GET' && action === 'current') { member(groupId, me.id); return latestSession(groupId); }
   if (method === 'GET' && action === 'history') {
     member(groupId, me.id);
-    return all(`SELECT ss.id, ss.state, ss.created_at AS createdAt, sr.profile_name AS winnerName,
-      sr.title, sr.kind, sr.year, sr.state AS resultState
-      FROM spin_sessions ss JOIN spin_results sr ON sr.session_id=ss.id
-      WHERE ss.group_id=? AND sr.rowid=(SELECT MAX(rowid) FROM spin_results WHERE session_id=ss.id)
-      ORDER BY ss.rowid DESC LIMIT 30`, groupId);
+    return groupHistory(db, groupId);
   }
   if (method === 'POST' && action === 'invite') {
     owner(groupId, me.id);
