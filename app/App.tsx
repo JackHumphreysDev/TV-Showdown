@@ -16,13 +16,14 @@ export default function App() {
   const desktop = width >= 800;
   const [booting, setBooting] = useState(true), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const [token, setToken] = useState<string | null>(null), [me, setMe] = useState<Me | null>(null);
-  const [groups, setGroups] = useState<Group[]>([]), [groupId, setGroupId] = useState<string | null>(null), [group, setGroup] = useState<Group | null>(null);
+  const [groups, setGroups] = useState<Group[]>([]), [groupId, setGroupId] = useState<string | null>(null), [groupDetail, setGroup] = useState<Group | null>(null);
   const [watchlist, setWatchlist] = useState<Item[]>([]), [spin, setSpin] = useState<Spin | null>(null), [history, setHistory] = useState<HistoryRow[]>([]);
   const [page, setPage] = useState<Page>('spin'), [selected, setSelected] = useState<string[]>([]), [filter, setFilter] = useState<'both' | Kind>('both');
   const [animating, setAnimating] = useState(false), [showOptions, setShowOptions] = useState(false), [options, setOptions] = useState<Availability | null>(null);
   const [authMode, setAuthMode] = useState<'register' | 'login'>('register'), [email, setEmail] = useState(''), [password, setPassword] = useState(''), [name, setName] = useState('');
   const [groupName, setGroupName] = useState(''), [roomCode, setRoomCode] = useState(''), [preview, setPreview] = useState<{ name: string; memberCount: number } | null>(null);
   const [invite, setInvite] = useState<{ code: string; link: string; expiresInDays: number } | null>(null);
+  const [viewedProfileId, setViewedProfileId] = useState<string | null>(null);
   const [query, setQuery] = useState(''), [searchResults, setSearchResults] = useState<SearchResult[]>([]), [catalogueConnected, setCatalogueConnected] = useState(true);
   const [manualTitle, setManualTitle] = useState(''), [manualKind, setManualKind] = useState<Kind>('movie'), [profileName, setProfileName] = useState('');
 
@@ -64,7 +65,11 @@ export default function App() {
     const timer = setInterval(() => refreshGroup(token, groupId).catch(() => {}), 10000);
     return () => clearInterval(timer);
   }, [token, groupId, refreshGroup]);
+  const group = groupDetail?.id === groupId ? groupDetail : null;
   const members = group?.members || [], groupItems = group?.watchlists || [];
+  const sharedMembers = members.filter((member) => member.active && member.accountId !== me?.id);
+  const viewedMember = sharedMembers.find((member) => member.profileId === viewedProfileId) || sharedMembers[0];
+  const sharedItems = groupItems.filter((item) => item.profileId === viewedMember?.profileId);
   const chosenMembers = useMemo(() => members.filter((m) => selected.includes(m.profileId)), [members, selected]);
   const canSpin = chosenMembers.length > 0 && chosenMembers.every((m) => groupItems.some((i) => i.profileId === m.profileId && (filter === 'both' || i.kind === filter)));
   const eligibleOwn = watchlist.filter((i) => i.status === 'want' || (i.kind === 'series' && i.status === 'watching')).length;
@@ -75,7 +80,10 @@ export default function App() {
   });
   const signOut = () => perform(async () => {
     if (token) await api('/api/auth/logout', token, 'POST');
-    await setStoredToken(null); setToken(null); setMe(null); setGroups([]); setGroup(null); setPage('spin');
+    await setStoredToken(null);
+    setToken(null); setMe(null); setGroups([]); setGroupId(null); setGroup(null);
+    setWatchlist([]); setSpin(null); setHistory([]); setSelected([]); setViewedProfileId(null);
+    setInvite(null); setSearchResults([]); setOptions(null); setShowOptions(false); setPage('spin');
   });
   const createGroup = () => perform(async () => {
     const created = await api<Group>('/api/groups', token, 'POST', { name: groupName });
@@ -176,13 +184,20 @@ export default function App() {
         </>}
       </>}
 
-      {page === 'watchlist' && <><Text style={s.eyebrow}>YOUR PICKS</Text><Text style={s.title}>Watchlist</Text><Text style={s.muted}>Only you can edit your list. Eligible titles are visible to your groups.</Text>
+      {page === 'watchlist' && <><Text style={s.eyebrow}>YOUR PICKS</Text><Text style={s.title}>Watchlist</Text><Text style={s.muted}>Only you can edit your list. Group members can see your eligible titles, but not your watched titles.</Text>
         <View style={s.card}><Text style={s.section}>Add a title</Text><Field label="Search films and series" value={query} onChangeText={setQuery} placeholder="Search by title" /><Button label="Search catalogue" onPress={search} disabled={busy} />
           {!catalogueConnected && <Text style={s.hint}>Catalogue search needs a TMDB API token. You can add a title manually.</Text>}
           {searchResults.map((r) => <Pressable key={`${r.kind}-${r.tmdbId}`} onPress={() => addItem(r)} style={s.listRow}><Poster title={r.title} path={r.posterPath} size={44} /><View style={{ flex: 1 }}><Text style={s.white}>{r.title}</Text><Text style={s.small}>{kindLabel(r.kind)}{r.year ? ` · ${r.year}` : ''}</Text></View><Text style={s.goldText}>＋</Text></Pressable>)}
           <View style={s.rule} /><Text style={s.label}>Or add your own</Text><Field label="Title" value={manualTitle} onChangeText={setManualTitle} placeholder="Film or series title" /><View style={s.row}><Chip label="Film" active={manualKind === 'movie'} onPress={() => setManualKind('movie')} /><Chip label="Series" active={manualKind === 'series'} onPress={() => setManualKind('series')} /></View><Button label="Add to watchlist" onPress={() => addItem({ title: manualTitle, kind: manualKind })} disabled={!manualTitle.trim() || busy} />
         </View><Text style={s.section}>Your titles <Text style={s.small}>· {watchlist.length} total, {eligibleOwn} eligible</Text></Text>
         {!watchlist.length ? <Text style={s.muted}>Your list starts here. Add a film or series above.</Text> : watchlist.map((item) => <View key={item.id} style={s.itemCard}><Poster title={item.title} path={item.posterPath} size={62} /><View style={{ flex: 1, gap: 6 }}><Text style={s.white}>{item.title}</Text><Text style={s.small}>{kindLabel(item.kind)}{item.year ? ` · ${item.year}` : ''}</Text><View style={s.row}>{(['want', 'watching', 'watched'] as Status[]).map((status) => <Chip key={status} label={statusLabel(status)} active={item.status === status} onPress={() => changeStatus(item, status)} />)}</View><Pressable onPress={() => removeItem(item)}><Text style={s.remove}>Remove</Text></Pressable></View></View>)}
+        {group && <View style={s.card}><Text style={s.eyebrow}>{group.name.toUpperCase()}</Text><Text style={s.section}>Group watchlists</Text><Text style={s.muted}>Browse titles your group can include in the wheel. Only the list owner can make changes.</Text>
+          {!sharedMembers.length ? <Text style={s.hint}>Invite someone to this group to see their eligible titles here.</Text> : <>
+            <View style={s.row}>{sharedMembers.map((member) => <Chip key={member.profileId} label={`${member.name} · ${groupItems.filter((item) => item.profileId === member.profileId).length}`} active={viewedMember?.profileId === member.profileId} onPress={() => setViewedProfileId(member.profileId)} />)}</View>
+            <Text style={s.label}>{viewedMember.name}’s eligible titles</Text>
+            {!sharedItems.length ? <Text style={s.muted}>Nothing eligible yet. They can add a film or series to their own watchlist.</Text> : sharedItems.map((item) => <View key={item.id} style={s.listRow}><Poster title={item.title} path={item.posterPath} size={48} /><View style={{ flex: 1 }}><Text style={s.white}>{item.title}</Text><Text style={s.small}>{kindLabel(item.kind)}{item.year ? ` · ${item.year}` : ''} · {statusLabel(item.status)}</Text></View></View>)}
+          </>}
+        </View>}
       </>}
 
       {page === 'groups' && <><Text style={s.eyebrow}>YOUR PEOPLE</Text><Text style={s.title}>Groups</Text><Text style={s.muted}>Keep your own watchlist, share it with the people you watch with.</Text>

@@ -4,6 +4,8 @@ TV Showdown is a shared film-night decision app for web, iOS and Android. Each p
 
 The app uses UK English and shows viewing options for the United Kingdom. `Want to watch` films and series, and `Watching` series, are eligible for the wheel.
 
+In a shared group, each member can browse other members’ eligible titles from the Watchlist screen. This view is read-only; watched titles and ineligible `Watching` films remain private to their owners.
+
 ## What is in this repository
 
 - `app/` — one Expo/React Native interface for web, iOS and Android.
