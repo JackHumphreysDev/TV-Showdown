@@ -13,8 +13,8 @@ export function Button({ label, onPress, quiet = false, disabled = false }: { la
     <Text style={[s.buttonText, quiet && s.buttonTextQuiet]}>{label}</Text>
   </Pressable>;
 }
-export function Field({ label, value, onChangeText, placeholder, secure = false, email = false }: { label: string; value: string; onChangeText: (value: string) => void; placeholder?: string; secure?: boolean; email?: boolean }) {
-  return <View style={{ gap: 7 }}><Text style={s.label}>{label}</Text><TextInput accessibilityLabel={label} style={s.input} value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor="#88838B" secureTextEntry={secure} keyboardType={email ? 'email-address' : 'default'} autoCapitalize={email ? 'none' : 'sentences'} /></View>;
+export function Field({ label, value, onChangeText, placeholder, secure = false, email = false, multiline = false }: { label: string; value: string; onChangeText: (value: string) => void; placeholder?: string; secure?: boolean; email?: boolean; multiline?: boolean }) {
+  return <View style={{ gap: 7 }}><Text style={s.label}>{label}</Text><TextInput accessibilityLabel={label} style={[s.input, multiline && s.textArea]} value={value} onChangeText={onChangeText} placeholder={placeholder} placeholderTextColor="#88838B" secureTextEntry={secure} keyboardType={email ? 'email-address' : 'default'} autoCapitalize={email ? 'none' : 'sentences'} multiline={multiline} numberOfLines={multiline ? 4 : 1} textAlignVertical={multiline ? 'top' : 'center'} /></View>;
 }
 export function Chip({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return <Pressable accessibilityRole="button" accessibilityState={{ selected: active }} onPress={onPress} style={[s.chip, active && s.chipActive]}><Text style={[s.chipText, active && s.chipTextActive]}>{label}</Text></Pressable>;
@@ -53,7 +53,7 @@ export function Wheel({ members, winnerId, spinning }: { members: Member[]; winn
 const s = StyleSheet.create({
   button: { alignSelf: 'flex-start', backgroundColor: gold, borderRadius: 13, paddingHorizontal: 19, paddingVertical: 13, minHeight: 46, justifyContent: 'center', alignItems: 'center' },
   buttonQuiet: { backgroundColor: '#2C2A2E', borderWidth: 1, borderColor: '#66616A' }, buttonText: { color: '#171519', fontWeight: '800', fontSize: 15 }, buttonTextQuiet: { color: '#F2EEF0' }, disabled: { opacity: .4 }, pressed: { opacity: .75 },
-  label: { color: '#E0DBDB', fontSize: 14, fontWeight: '700' }, input: { color: '#FCF9F3', backgroundColor: '#28262A', borderWidth: 1, borderColor: '#5A535D', borderRadius: 11, paddingHorizontal: 13, minHeight: 46, fontSize: 16 },
+  label: { color: '#E0DBDB', fontSize: 14, fontWeight: '700' }, input: { color: '#FCF9F3', backgroundColor: '#28262A', borderWidth: 1, borderColor: '#5A535D', borderRadius: 11, paddingHorizontal: 13, minHeight: 46, fontSize: 16 }, textArea: { minHeight: 104, paddingTop: 12 },
   chip: { borderWidth: 1, borderColor: '#55515B', borderRadius: 24, backgroundColor: '#28262B', paddingHorizontal: 13, paddingVertical: 9 }, chipActive: { backgroundColor: '#58472D', borderColor: gold }, chipText: { color: '#C6C0C5', fontSize: 13, fontWeight: '700' }, chipTextActive: { color: '#FFE5B0' },
   poster: { backgroundColor: '#493540', borderRadius: 8, alignItems: 'center', justifyContent: 'space-around', padding: 5 }, posterStar: { color: gold, fontSize: 21 }, posterTitle: { color: '#FFF8EC', fontSize: 11, fontWeight: '700', textAlign: 'center' },
   wheelWrap: { alignSelf: 'center', paddingTop: 13 }, pointer: { position: 'absolute', zIndex: 3, top: 0, left: '50%', marginLeft: -11, width: 0, height: 0, borderLeftWidth: 11, borderRightWidth: 11, borderTopWidth: 20, borderLeftColor: 'transparent', borderRightColor: 'transparent', borderTopColor: gold },

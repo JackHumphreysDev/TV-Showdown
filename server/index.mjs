@@ -16,6 +16,12 @@ const requiredText = (value, label, max = 120) => {
   if (!text || text.length > max) fail(400, `${label} must be 1–${max} characters`);
   return text;
 };
+const optionalYear = (value) => {
+  if (value === undefined || value === null || value === '') return null;
+  const year = Number(value);
+  if (!Number.isSafeInteger(year) || year < 1800 || year > new Date().getFullYear() + 10) fail(400, 'Enter a valid four-digit release year');
+  return year;
+};
 const passwordHash = (password) => {
   const salt = randomBytes(16).toString('hex');
   return `${salt}:${scryptSync(password, salt, 64).toString('hex')}`;
@@ -198,7 +204,7 @@ async function route(request) {
     return groupDetails(invite.group_id, me.id);
   }
   if (method === 'GET' && path === '/api/watchlist') {
-    return all(`SELECT id,title,kind,year,tmdb_id AS tmdbId,poster_path AS posterPath,overview,status,added_at AS addedAt
+    return all(`SELECT id,title,kind,year,tmdb_id AS tmdbId,poster_path AS posterPath,overview,note,status,added_at AS addedAt
       FROM watchlist WHERE account_id=? ORDER BY added_at DESC, rowid DESC`, me.id);
   }
   if (method === 'POST' && path === '/api/watchlist') {
@@ -209,17 +215,29 @@ async function route(request) {
     if (tmdbId && one('SELECT id FROM watchlist WHERE account_id=? AND kind=? AND tmdb_id=?', me.id, kind, tmdbId)) fail(409, 'Already on your watchlist');
     if (!tmdbId && one('SELECT id FROM watchlist WHERE account_id=? AND kind=? AND lower(title)=lower(?)', me.id, kind, title)) fail(409, 'Already on your watchlist');
     const id = randomUUID();
-    run(`INSERT INTO watchlist(id,account_id,title,kind,year,tmdb_id,poster_path,overview)
-      VALUES(?,?,?,?,?,?,?,?)`, id, me.id, title, kind, Number(data.year) || null, tmdbId,
-      String(data.posterPath || '').slice(0, 200) || null, String(data.overview || '').slice(0, 1500) || null);
+    run(`INSERT INTO watchlist(id,account_id,title,kind,year,tmdb_id,poster_path,overview,note)
+      VALUES(?,?,?,?,?,?,?,?,?)`, id, me.id, title, kind, optionalYear(data.year), tmdbId,
+      String(data.posterPath || '').slice(0, 200) || null, String(data.overview || '').slice(0, 1500) || null,
+      String(data.note || '').trim().slice(0, 1000) || null);
     return one('SELECT * FROM watchlist WHERE id=?', id);
   }
   const itemMatch = path.match(/^\/api\/watchlist\/([\w-]+)$/);
   if (itemMatch && method === 'PATCH') {
     const data = await body(request);
-    if (!['want', 'watching', 'watched'].includes(data.status)) fail(400, 'Invalid watchlist status');
-    if (!one('SELECT id FROM watchlist WHERE id=? AND account_id=?', itemMatch[1], me.id)) fail(404, 'Title not found');
-    run('UPDATE watchlist SET status=? WHERE id=?', data.status, itemMatch[1]);
+    const item = one('SELECT * FROM watchlist WHERE id=? AND account_id=?', itemMatch[1], me.id);
+    if (!item) fail(404, 'Title not found');
+    const hasStatus = Object.hasOwn(data, 'status'), hasNote = Object.hasOwn(data, 'note');
+    const hasTitle = Object.hasOwn(data, 'title'), hasKind = Object.hasOwn(data, 'kind'), hasYear = Object.hasOwn(data, 'year');
+    if (!hasStatus && !hasNote && !hasTitle && !hasKind && !hasYear) fail(400, 'Choose a watchlist change to save');
+    if (hasStatus && !['want', 'watching', 'watched'].includes(data.status)) fail(400, 'Invalid watchlist status');
+    if (item.tmdb_id && (hasTitle || hasKind || hasYear)) fail(400, 'Catalogue title details cannot be edited manually');
+    const title = hasTitle ? requiredText(data.title, 'Title', 200) : item.title;
+    const kind = hasKind ? (data.kind === 'movie' || data.kind === 'series' ? data.kind : fail(400, 'Choose movie or series')) : item.kind;
+    const year = hasYear ? optionalYear(data.year) : item.year;
+    const note = hasNote ? String(data.note || '').trim().slice(0, 1000) || null : item.note;
+    const status = hasStatus ? data.status : item.status;
+    if (!item.tmdb_id && one('SELECT id FROM watchlist WHERE account_id=? AND id<>? AND kind=? AND lower(title)=lower(?)', me.id, item.id, kind, title)) fail(409, 'Already on your watchlist');
+    run('UPDATE watchlist SET title=?,kind=?,year=?,note=?,status=? WHERE id=?', title, kind, year, note, status, item.id);
     return { ok: true };
   }
   if (itemMatch && method === 'DELETE') {

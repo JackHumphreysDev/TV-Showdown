@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS watchlist (
   id TEXT PRIMARY KEY, account_id TEXT NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
   title TEXT NOT NULL, kind TEXT NOT NULL CHECK(kind IN ('movie','series')),
   year INTEGER, tmdb_id INTEGER, poster_path TEXT, overview TEXT,
+  note TEXT,
   status TEXT NOT NULL DEFAULT 'want' CHECK(status IN ('want','watching','watched')),
   added_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -60,6 +61,8 @@ CREATE TABLE IF NOT EXISTS spin_results (
 CREATE INDEX IF NOT EXISTS spin_sessions_group ON spin_sessions(group_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS spin_results_session ON spin_results(session_id, created_at DESC);
 `);
+const watchlistColumns = db.prepare('PRAGMA table_info(watchlist)').all();
+if (!watchlistColumns.some((column) => column.name === 'note')) db.exec('ALTER TABLE watchlist ADD COLUMN note TEXT');
 
 export function transaction(fn) {
   db.exec('BEGIN IMMEDIATE');
