@@ -40,4 +40,6 @@ const accepted = await call(`/api/groups/${group.id}/accept`, regis.token, 'POST
 assert.equal(accepted.state, 'accepted');
 const history = await call(`/api/groups/${group.id}/history`, rachel.token);
 assert.equal(history[0].resultState, 'accepted');
+assert.equal('posterPath' in history[0], true);
+assert.equal('overview' in history[0], true);
 console.log('API smoke test passed: separate accounts, invite, UK group, watchlists, eligible series, fair spin, idempotency and shared acceptance.');
